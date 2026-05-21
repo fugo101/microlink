@@ -17,8 +17,7 @@
 #include "microlink_internal.h"
 #include "esp_log.h"
 #include "esp_random.h"
-#include "mbedtls/chacha20.h"
-#include "mbedtls/chachapoly.h"
+#include "mbedtls/private/chachapoly.h"
 #include <string.h>
 
 static const char *TAG = "ml_noise";

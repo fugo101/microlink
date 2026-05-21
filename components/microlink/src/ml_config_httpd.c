@@ -237,8 +237,8 @@ static void config_load_wifi_list(ml_config_ctx_t *ctx) {
         if (ctx->settings.wifi_ssid[0] != '\0') {
             ctx->wifi_list.count = 1;
             ctx->wifi_list.active_idx = 0;
-            strncpy(ctx->wifi_list.entries[0].ssid, ctx->settings.wifi_ssid, 32);
-            strncpy(ctx->wifi_list.entries[0].pass, ctx->settings.wifi_pass, 64);
+            snprintf(ctx->wifi_list.entries[0].ssid, sizeof(ctx->wifi_list.entries[0].ssid), "%s", ctx->settings.wifi_ssid);
+            snprintf(ctx->wifi_list.entries[0].pass, sizeof(ctx->wifi_list.entries[0].pass), "%s", ctx->settings.wifi_pass);
             ESP_LOGI(TAG, "WiFi list: migrated from settings (%s)", ctx->settings.wifi_ssid);
         } else {
             ESP_LOGI(TAG, "WiFi list: empty (no saved networks)");
@@ -875,10 +875,8 @@ static esp_err_t handler_post_wifi(httpd_req_t *req) {
     if (ctx->wifi_list.count > 0) {
         memset(ctx->settings.wifi_ssid, 0, sizeof(ctx->settings.wifi_ssid));
         memset(ctx->settings.wifi_pass, 0, sizeof(ctx->settings.wifi_pass));
-        strncpy(ctx->settings.wifi_ssid, ctx->wifi_list.entries[0].ssid,
-                sizeof(ctx->settings.wifi_ssid) - 1);
-        strncpy(ctx->settings.wifi_pass, ctx->wifi_list.entries[0].pass,
-                sizeof(ctx->settings.wifi_pass) - 1);
+        snprintf(ctx->settings.wifi_ssid, sizeof(ctx->settings.wifi_ssid), "%s", ctx->wifi_list.entries[0].ssid);
+        snprintf(ctx->settings.wifi_pass, sizeof(ctx->settings.wifi_pass), "%s", ctx->wifi_list.entries[0].pass);
         config_save_settings(ctx);
     }
 
@@ -934,8 +932,8 @@ bool ml_config_get_wifi_list(ml_config_wifi_list_t *list) {
     if (err == ESP_OK && settings->wifi_ssid[0] != '\0') {
         list->count = 1;
         list->active_idx = 0;
-        strncpy(list->entries[0].ssid, settings->wifi_ssid, 32);
-        strncpy(list->entries[0].pass, settings->wifi_pass, 64);
+        snprintf(list->entries[0].ssid, sizeof(list->entries[0].ssid), "%s", settings->wifi_ssid);
+        snprintf(list->entries[0].pass, sizeof(list->entries[0].pass), "%s", settings->wifi_pass);
         free(settings);
         return true;
     }

@@ -122,6 +122,22 @@ static void *cjson_psram_malloc(size_t size) {
 }
 
 /* ============================================================================
+ * Credential Check
+ * ========================================================================== */
+
+bool microlink_has_stored_credentials(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    uint8_t key[32];
+    size_t len = sizeof(key);
+    bool found = (nvs_get_blob(nvs, NVS_KEY_MACHINE_PRI, key, &len) == ESP_OK);
+    nvs_close(nvs);
+    return found;
+}
+
+/* ============================================================================
  * Factory Reset
  * ========================================================================== */
 

@@ -24,8 +24,6 @@
 #include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "mbedtls/ssl.h"
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
 #include "esp_heap_caps.h"
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
@@ -324,8 +322,6 @@ typedef struct {
     int sockfd;                     /* Raw TCP socket */
     mbedtls_ssl_context ssl;        /* TLS context (owned exclusively by DERP I/O task) */
     mbedtls_ssl_config ssl_conf;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
     bool connected;
     uint64_t last_recv_ms;          /* For keepalive watchdog */
 } ml_derp_conn_t;

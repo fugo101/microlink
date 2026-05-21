@@ -268,9 +268,14 @@ static esp_err_t wg_init_interface(microlink_t *ml) {
     netif->next = netif_list;
     netif_list = netif;
 
-    /* Bring interface up */
+    /* Bring interface up — temporarily NULL state so ESP-IDF's global
+     * netif ext callback (esp_netif_lwip.c) doesn't misinterpret the
+     * wireguard_device* stored in netif->state as an esp_netif_t*. */
+    void *wg_state = netif->state;
+    netif->state = NULL;
     netif_set_up(netif);
     netif_set_link_up(netif);
+    netif->state = wg_state;
 
     /* Create raw UDP PCB for WG output (avoids BSD sendto deadlock on TCPIP
      * thread).  Bind to port 51820 to match the DISCO socket source port.
@@ -438,7 +443,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     p->vpn_ip = update->vpn_ip;
     memcpy(p->public_key, update->public_key, 32);
     memcpy(p->disco_key, update->disco_key, 32);
-    strncpy(p->hostname, update->hostname, sizeof(p->hostname) - 1);
+    memcpy(p->hostname, update->hostname, sizeof(p->hostname) - 1);
     p->hostname[sizeof(p->hostname) - 1] = '\0';
     p->derp_region = update->derp_region;
     p->active = true;
@@ -579,7 +584,8 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
             .online = true,
             .direct_path = false,
         };
-        strncpy(info.hostname, p->hostname, sizeof(info.hostname) - 1);
+        memcpy(info.hostname, p->hostname, sizeof(info.hostname) - 1);
+        info.hostname[sizeof(info.hostname) - 1] = '\0';
         memcpy(info.public_key, p->public_key, 32);
         ml->peer_cb(ml, &info, ml->peer_cb_data);
     }

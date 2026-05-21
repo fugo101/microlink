@@ -772,6 +772,12 @@ MicroLink includes improvements from community forks:
 
 - **[GrieferPig](https://github.com/GrieferPig)** — WireGuard peer lookup fix to prefer peers with valid keypairs, preventing handshake failures with stale peer references.
 
+## ESP-IDF 6.x Compatibility Branch
+
+Branch: `esp-idf-6x-compat` (rebased on top of upstream `main`)
+
+See [ESP_IDF_6X_COMPAT.md](ESP_IDF_6X_COMPAT.md) for the full list of patches, maintenance instructions, and integration guide.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE)
