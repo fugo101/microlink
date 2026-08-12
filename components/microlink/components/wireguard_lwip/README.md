@@ -2,6 +2,21 @@
 
 > **Upstream:** [smartalock/wireguard-lwip](https://github.com/smartalock/wireguard-lwip)
 > This copy includes patches for ESP-IDF 6.x / GCC 15 — see [ESP_IDF_6X_COMPAT.md](../../../../ESP_IDF_6X_COMPAT.md).
+>
+> ⚠️ **This copy has diverged substantially from upstream — any future sync is a manual merge, not
+> a fast-forward.** The most visible divergence: upstream's single `allowed_ip`/`allowed_mask` pair
+> was replaced with an `allowed_source_ips[WIREGUARD_MAX_SRC_IPS]` array, plus the ESP-IDF 6.x/GCC 15
+> patches above and `WG_DEBUG` logging throughout.
+>
+> **To check upstream for new fixes:**
+> ```bash
+> git remote add smartalock https://github.com/smartalock/wireguard-lwip.git   # one-time
+> git fetch smartalock
+> git log --oneline smartalock/master -- src/
+> ```
+> As of 2026-08-10, upstream had three commits past the divergence point, all already present here:
+> the cryptokey-routing source-IP fix (`ac84f4c`) was independently fixed in `wireguardif.c`, and
+> both 2022 replay-detection fixes are present in `wireguard.c`.
 
 This project is a C implementation of the [WireGuard&reg;](https://www.wireguard.com/) protocol intended to be used with the [lwIP IP stack](https://www.nongnu.org/lwip/)
 

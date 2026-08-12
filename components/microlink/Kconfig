@@ -253,21 +253,23 @@ menu "MicroLink V2 Configuration"
 
     menu "Credentials"
         comment "Configure via: idf.py menuconfig → MicroLink V2 → Credentials"
-        comment "These values are stored in sdkconfig (git-ignored)."
+        comment "These values are stored in this project's sdkconfig — keep it out of any public repository."
 
         config ML_WIFI_SSID
             string "WiFi SSID"
             default ""
             help
                 SSID of the WiFi network to connect to.
-                This is stored in sdkconfig which should be git-ignored.
+                Stored in this project's sdkconfig. Whether that file is version-controlled
+                depends on the consuming project — keep this value out of any public repository.
 
         config ML_WIFI_PASSWORD
             string "WiFi Password"
             default ""
             help
                 Password for the WiFi network.
-                This is stored in sdkconfig which should be git-ignored.
+                Stored in this project's sdkconfig. Whether that file is version-controlled
+                depends on the consuming project — keep this value out of any public repository.
 
         config ML_TAILSCALE_AUTH_KEY
             string "Tailscale Auth Key"
@@ -275,7 +277,8 @@ menu "MicroLink V2 Configuration"
             help
                 Tailscale authentication key from https://login.tailscale.com/admin/settings/keys
                 Generate a reusable + ephemeral key for development.
-                This is stored in sdkconfig which should be git-ignored.
+                Stored in this project's sdkconfig. Whether that file is version-controlled
+                depends on the consuming project — keep this value out of any public repository.
 
         config ML_DEVICE_NAME
             string "Device Name"
