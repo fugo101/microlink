@@ -34,7 +34,6 @@ set(REQUIRES
     mbedtls
     espressif__cjson
     driver
-    esp_driver_tsens
     esp_http_server
     # ml_cellular.c / ml_at_socket.c include driver/uart.h and driver/gpio.h. On
     # ESP-IDF 6.x those headers live in esp_driver_uart / esp_driver_gpio, not in
@@ -49,6 +48,10 @@ set(REQUIRES
     esp_driver_uart
     esp_driver_gpio
 )
+
+if(CONFIG_SOC_TEMP_SENSOR_SUPPORTED)
+    list(APPEND REQUIRES esp_driver_tsens)
+endif()
 
 idf_component_register(
     SRCS ${SRCS}
