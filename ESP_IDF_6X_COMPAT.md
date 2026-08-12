@@ -131,18 +131,36 @@ git push -f origin esp-idf-6x-compat
 ```bash
 cd your-project
 mkdir -p vendor
-git submodule add -b esp-idf-6x-compat https://github.com/fudio101/microlink.git vendor/microlink
+git submodule add -b main https://github.com/fudio101/microlink.git vendor/microlink
 ln -s ../vendor/microlink/components/microlink   components/microlink
 ln -s ../vendor/microlink/components/wireguard_lwip components/wireguard_lwip
 git add .gitmodules vendor/microlink components/microlink components/wireguard_lwip
 ```
+(`esp-idf-6x-compat` was fast-forward merged into `main` on 2026-08-12 and is no longer needed —
+`main` already carries the ESP-IDF 6.x/mbedTLS 4.x/GCC 15 patches.)
 
-In `platformio.ini`, add credentials overlay (git-ignored):
+**Credentials.** `board_build.esp-idf.sdkconfig_extra` is **not a real PlatformIO option** — it is
+silently ignored, so a key placed in a separate "overlay" file this way is never applied. PlatformIO
+only reads `board_build.esp-idf.sdkconfig_path`, and that option *replaces* the sdkconfig outright
+rather than layering onto it (verified against `espidf.py`, which passes it as `-DSDKCONFIG=<path>`).
+
+If your project's sdkconfig is already gitignored (the default for a fresh PlatformIO project),
+there is nothing to work around — set the credentials via `pio run -t menuconfig` or edit the
+tracked sdkconfig directly; it never reaches git.
+
+If your project intentionally tracks its sdkconfig (as some do, to keep the full build config
+reviewable, with a separate guard against committing secrets), point at a **complete**, untracked
+sdkconfig instead — not a fragment:
 ```ini
-board_build.esp-idf.sdkconfig_extra = sdkconfig.credentials
+; platformio.ini — local-only, keep out of git
+board_build.esp-idf.sdkconfig_path = sdkconfig.local
+```
+```bash
+cp sdkconfig.<env-name> sdkconfig.local   # then set the credentials in sdkconfig.local
+echo sdkconfig.local >> .gitignore
 ```
 
-`sdkconfig.credentials` (git-ignored):
+Either way, the values you need:
 ```
 CONFIG_ML_TAILSCALE_AUTH_KEY="tskey-auth-xxxxxxxxxxxx"
 CONFIG_ML_DEVICE_NAME="my-device"
