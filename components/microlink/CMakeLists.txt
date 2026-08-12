@@ -13,11 +13,16 @@ set(SRCS
     "src/nacl_box.c"
     "src/x25519.c"
     "src/ml_zerocopy.c"
-    "src/ml_cellular.c"
-    "src/ml_at_socket.c"
     "src/ml_net_switch.c"
     "src/ml_config_httpd.c"
 )
+
+if(CONFIG_ML_ENABLE_CELLULAR)
+    list(APPEND SRCS
+        "src/ml_cellular.c"
+        "src/ml_at_socket.c"
+    )
+endif()
 
 set(REQUIRES
     nvs_flash
@@ -27,7 +32,7 @@ set(REQUIRES
     esp_timer
     lwip
     mbedtls
-    json
+    espressif__cjson
     driver
     esp_driver_tsens
     esp_http_server
@@ -41,4 +46,8 @@ idf_component_register(
     REQUIRES ${REQUIRES}
     PRIV_REQUIRES
         wireguard_lwip
+)
+
+set_source_files_properties(src/nacl_box.c
+    PROPERTIES COMPILE_FLAGS "-Wno-unterminated-string-initialization"
 )

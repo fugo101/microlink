@@ -74,6 +74,18 @@ typedef void (*microlink_data_cb_t)(microlink_t *ml, uint32_t src_ip, const uint
                                      size_t len, void *user_data);
 
 /**
+ * @brief Check if a stored Tailscale session exists in NVS
+ * @return true if machine key is present in NVS (device previously registered)
+ *
+ * Use this to decide whether to call microlink_init() when no auth key is
+ * configured: if true, the device can reconnect using the cached session
+ * without a new auth key; if false, an auth key is required to register.
+ *
+ * Must be called BEFORE microlink_init().
+ */
+bool microlink_has_stored_credentials(void);
+
+/**
  * @brief Factory reset — erase all stored keys and cached peers
  * @return ESP_OK on success
  *

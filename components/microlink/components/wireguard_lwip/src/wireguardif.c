@@ -391,7 +391,7 @@ static void wireguardif_process_response_message(struct wireguard_device *device
 		wireguardif_send_keepalive(device, peer);
 
 		// Set the IF-UP flag on netif
-		netif_set_link_up(device->netif);
+		device->netif->state = NULL; netif_set_link_up(device->netif); device->netif->state = device;
 		printf("[WG] *** WIREGUARD SESSION ESTABLISHED wg_idx=%u ***\n", wg_idx);
 	} else {
 		// Packet bad
@@ -482,7 +482,7 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
 					}
 
 					// Make sure that link is reported as up
-					netif_set_link_up(device->netif);
+					device->netif->state = NULL; netif_set_link_up(device->netif); device->netif->state = device;
 
 					if (pbuf->tot_len > 0) {
 						//4a. Once the packet payload is decrypted, the interface has a plaintext packet. If this is not an IP packet, it is dropped.
@@ -1155,7 +1155,7 @@ static void wireguardif_tmr(void *arg) {
 
 	if (!link_up) {
 		// Clear the IF-UP flag on netif
-		netif_set_link_down(device->netif);
+		device->netif->state = NULL; netif_set_link_down(device->netif); device->netif->state = device;
 	}
 }
 
@@ -1205,7 +1205,7 @@ void wireguardif_periodic(struct netif *netif) {
 		}
 	}
 	if (!link_up) {
-		netif_set_link_down(device->netif);
+		device->netif->state = NULL; netif_set_link_down(device->netif); device->netif->state = device;
 	}
 }
 

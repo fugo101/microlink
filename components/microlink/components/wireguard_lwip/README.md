@@ -1,5 +1,8 @@
 # WireGuard Implementation for lwIP
 
+> **Upstream:** [smartalock/wireguard-lwip](https://github.com/smartalock/wireguard-lwip)
+> This copy includes patches for ESP-IDF 6.x / GCC 15 — see [ESP_IDF_6X_COMPAT.md](../../../../ESP_IDF_6X_COMPAT.md).
+
 This project is a C implementation of the [WireGuard&reg;](https://www.wireguard.com/) protocol intended to be used with the [lwIP IP stack](https://www.nongnu.org/lwip/)
 
 # Motivation

@@ -26,3 +26,7 @@ set_source_files_properties(
     src/crypto/refc/x25519.c
     PROPERTIES COMPILE_FLAGS "-Wno-stringop-overread"
 )
+
+set_source_files_properties(src/wireguard.c
+    PROPERTIES COMPILE_FLAGS "-Wno-unterminated-string-initialization"
+)
