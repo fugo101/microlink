@@ -1,0 +1,74 @@
+name: Release Please
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          # App token required: a GITHUB_TOKEN-created PR does not trigger downstream
+          # workflows, so CI would not run on the Release PR itself.
+          token: ${{ steps.app-token.outputs.token }}
+
+  publish-dry-run:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Non-blocking until the `fugo101` namespace is approved on the ESP Component
+    # Registry (Espressif manual approval -- Phase 3 of the migration plan in
+    # docs/microlink-registry-migration.md over in zen-clock). Until then this
+    # step fails with "Namespace not found" even in dry-run mode, which is a
+    # real external dependency, not a bug here. Drop continue-on-error once the
+    # namespace exists.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: espressif/upload-components-ci-action@v2
+        with:
+          namespace: fugo101
+          dry_run: "true"
+          components: "microlink:components/microlink"
+
+  publish-component:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write   # mints a GitHub OIDC token, exchanged for a registry token
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: espressif/upload-components-ci-action@v2
+        with:
+          namespace: fugo101
+          components: "microlink:components/microlink"
