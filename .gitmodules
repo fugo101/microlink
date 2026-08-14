@@ -1,0 +1,3 @@
+[submodule "components/wireguard_lwip"]
+	path = components/wireguard_lwip
+	url = https://github.com/fugo101/wireguard-lwip.git
