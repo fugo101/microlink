@@ -36,17 +36,19 @@ set(REQUIRES
     driver
     esp_driver_tsens
     esp_http_server
-)
-
-if(CONFIG_ML_ENABLE_CELLULAR)
     # ml_cellular.c / ml_at_socket.c include driver/uart.h and driver/gpio.h. On
     # ESP-IDF 6.x those headers live in esp_driver_uart / esp_driver_gpio, not in
     # the umbrella `driver` component above -- `driver` only PRIV_REQUIRES
     # esp_driver_gpio (private, doesn't propagate) and doesn't require
-    # esp_driver_uart at all. Without these, any CONFIG_ML_ENABLE_CELLULAR=y
-    # build fails to find both headers.
-    list(APPEND REQUIRES esp_driver_uart esp_driver_gpio)
-endif()
+    # esp_driver_uart at all. Unconditional, not gated on CONFIG_ML_ENABLE_CELLULAR:
+    # REQUIRES/PRIV_REQUIRES are resolved during ESP-IDF's component-requirements
+    # expansion pass, which runs before Kconfig is available -- REQUIRES can never
+    # be conditioned on a CONFIG_* value (only SRCS can, in the later registration
+    # pass). Confirmed empirically: a Kconfig-gated REQUIRES here silently no-ops
+    # in every environment tried (PlatformIO and real ESP-IDF Docker CI alike).
+    esp_driver_uart
+    esp_driver_gpio
+)
 
 idf_component_register(
     SRCS ${SRCS}

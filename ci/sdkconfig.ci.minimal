@@ -1,0 +1,8 @@
+# Config-variant overlay for CI: everything optional switched off, on top of
+# basic_connect's own sdkconfig.defaults -- catches REQUIRES/ifdef mistakes
+# that only show up when optional features are compiled OUT, not in.
+# See .github/workflows/ci.yml's config-variants job.
+CONFIG_ML_ENABLE_CONFIG_HTTPD=n
+CONFIG_ML_ZERO_COPY_WG=n
+CONFIG_ML_ENABLE_CELLULAR=n
+CONFIG_ML_ENABLE_NET_SWITCH=n
