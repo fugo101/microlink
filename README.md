@@ -49,7 +49,9 @@ Production-ready Tailscale VPN client for the ESP32 platform with WiFi and 4G ce
 
 ## Requirements
 
-- ESP-IDF v5.0 or later (tested with v5.3)
+- **ESP-IDF 6.0.x required** (5.x is not supported by this fork) — `src/ml_noise.c` includes
+  `<mbedtls/private/chachapoly.h>`, which only exists in the TF-PSA-Crypto tree shipped from
+  ESP-IDF 6.0 onward. Upstream `CamM2325/microlink` still targets 5.x; this fork does not.
 - ESP32 with WiFi (ESP32-S3 with PSRAM recommended)
 - Tailscale account with auth key (generate at https://login.tailscale.com/admin/settings/keys)
 - For cellular: ESP32-compatible 4G cellular module (e.g., SIM7600, SIM7670) + active SIM card
@@ -77,14 +79,45 @@ Production-ready Tailscale VPN client for the ESP32 platform with WiFi and 4G ce
 
 MicroLink uses standard ESP-IDF APIs — any ESP32 variant with WiFi and sufficient RAM should work. ESP32-P4, ESP32-C3, ESP32-C6, etc. Boards with PSRAM are recommended for large tailnets (100+ peers).
 
+## Installation
+
+As a component in your own project, via the ESP Component Registry:
+
+```yaml
+# your_project/main/idf_component.yml
+dependencies:
+  fugo101/microlink:
+    version: "^3.0.0"
+```
+
+`fugo101/wireguard_lwip` (the WireGuard/lwIP integration this depends on) comes along
+transitively — you never declare it yourself. See `components/microlink/idf_component.yml` in
+this repo for the exact pin.
+
+To hack on microlink itself alongside a consuming project, use `override_path` in that project's
+manifest instead of the registry version — locally, never committed. Path resolution is relative
+to the directory containing the manifest file, and must point at the component directory (the one
+with `CMakeLists.txt`), not the repo root:
+
+```yaml
+  fugo101/microlink:
+    # override_path: "../../microlink/components/microlink"
+```
+
 ## Quick Start
 
 ### 1. Clone and enter an example
 
 ```bash
-git clone https://github.com/CamM2325/microlink.git
+git clone --recurse-submodules https://github.com/fugo101/microlink.git
 cd microlink/examples/basic_connect    # or: cellular_connect, cellular_heartbeat, failover_connect
 ```
+
+`--recurse-submodules` is needed because `components/wireguard_lwip` is a git submodule pointing
+at [fugo101/wireguard-lwip](https://github.com/fugo101/wireguard-lwip) -- a real fork of
+[smartalock/wireguard-lwip](https://github.com/smartalock/wireguard-lwip) (Daniel Hope, BSD-3-Clause),
+not a vendored copy. It's only needed to build the examples in *this* repo; consumers pulling
+`fugo101/microlink` from the registry get it transitively and never see the submodule.
 
 ### 2. Configure sdkconfig
 
@@ -758,7 +791,10 @@ if (now - last_heap_log > 60000) {  // Every 60 seconds
 - [Headscale](https://github.com/juanfont/headscale) for open-source coordination server insights
 - [WireGuard](https://www.wireguard.com/) for the cryptographic foundation
 - [lwIP](https://savannah.nongnu.org/projects/lwip/) for the TCP/IP stack
-- [wireguard-lwip](https://github.com/smartalock/wireguard-lwip) for WireGuard-lwIP integration
+- [wireguard-lwip](https://github.com/smartalock/wireguard-lwip) (Daniel Hope, BSD-3-Clause) for
+  WireGuard-lwIP integration. `components/wireguard_lwip` is a git submodule pointing at
+  [fugo101/wireguard-lwip](https://github.com/fugo101/wireguard-lwip), a real fork carrying this
+  project's changes as commits on top of Daniel Hope's original history -- not a vendored copy.
 
 ### Developed By
 
@@ -772,11 +808,12 @@ MicroLink includes improvements from community forks:
 
 - **[GrieferPig](https://github.com/GrieferPig)** — WireGuard peer lookup fix to prefer peers with valid keypairs, preventing handshake failures with stale peer references.
 
-## ESP-IDF 6.x Compatibility Branch
+## ESP-IDF 6.x Compatibility
 
-Branch: `esp-idf-6x-compat` (rebased on top of upstream `main`)
+`esp-idf-6x-compat` was fast-forward merged into `main` on 2026-08-12 and is no longer a separate
+branch -- `main` already carries the ESP-IDF 6.x/mbedTLS 4.x/GCC 15 patches.
 
-See [ESP_IDF_6X_COMPAT.md](ESP_IDF_6X_COMPAT.md) for the full list of patches, maintenance instructions, and integration guide.
+See [ESP_IDF_6X_COMPAT.md](ESP_IDF_6X_COMPAT.md) for the full list of patches and maintenance instructions.
 
 ## License
 

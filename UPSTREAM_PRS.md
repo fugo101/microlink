@@ -45,13 +45,16 @@ git log --grep="cherry picked from"
 ```
 
 If upstream ever revives and merges #20/#21/#23 themselves, a future `git fetch upstream && git
-merge upstream/main` (or a rebase via `update.sh`) will conflict on those hunks — that's expected;
-resolve by keeping our side, since it's the same change.
+merge upstream/main` will conflict on those hunks — that's expected; resolve by keeping our side,
+since it's the same change.
 
-## `update.sh` — known-stale, not fixed here
+## `update.sh` — removed
 
-`update.sh` rebases a branch named `esp-idf-6x-compat` onto `upstream/main` and force-pushes. That
-branch is already merged into `main` (`fce0875`) and hasn't moved since; `main` also carries two
-more commits (`f377a70`, `2bc586e`) that only exist there, not on `esp-idf-6x-compat`. Running the
-script as written would rebase the wrong, stale branch and could ship a `main` missing those two
-commits. Left as-is pending a separate fix — don't run it without checking this first.
+Used to rebase a branch named `esp-idf-6x-compat` onto `upstream/main` and force-push it. That
+branch was already merged into `main` (`fce0875`) and hadn't moved since; `main` also carries two
+more commits (`f377a70`, `2bc586e`) that only ever existed there, not on `esp-idf-6x-compat`.
+Running the script as written would have rebased the wrong, stale branch and could have shipped a
+`main` missing those two commits. Removed rather than fixed — `.github/workflows/upstream-drift.yml`
+covers the "is upstream ahead of us" question the script existed for, without the force-push risk.
+See [ESP_IDF_6X_COMPAT.md](ESP_IDF_6X_COMPAT.md)'s Maintenance section for the manual cherry-pick
+recipe that replaces it.

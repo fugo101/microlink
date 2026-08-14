@@ -1,8 +1,9 @@
-# ESP-IDF 6.x Compatibility Branch
+# ESP-IDF 6.x Compatibility
 
-Branch: `esp-idf-6x-compat` (rebased on top of upstream `main`)
+`esp-idf-6x-compat` was fast-forward merged into `main` on 2026-08-12 and is no longer a separate
+branch -- these patches live on `main`.
 
-Upstream MicroLink targets ESP-IDF v5.x. This branch adds patches to build cleanly on
+Upstream MicroLink targets ESP-IDF v5.x. This fork carries patches to build cleanly on
 **ESP-IDF 6.0+** (mbedTLS 4.x / TF-PSA-Crypto, GCC 15).
 
 ## Patches Applied
@@ -105,39 +106,33 @@ Must be called before `microlink_init()`. Read-only NVS access (namespace `"micr
 
 ## Maintenance — Syncing Upstream Updates
 
-Use `update.sh` in the repo root:
+`update.sh` (which rebased a branch that no longer exists, `esp-idf-6x-compat`, onto
+`upstream/main`) has been removed -- see [UPSTREAM_PRS.md](UPSTREAM_PRS.md)'s "known-stale" note
+for why it stopped being safe to run. In its place:
 
-```bash
-cd /path/to/microlink-fork
-./update.sh
+- `.github/workflows/upstream-drift.yml` runs weekly (and on demand via `workflow_dispatch`) and
+  opens/updates a single tracking issue (label `upstream-drift`) listing any upstream commits or
+  open PRs not yet accounted for.
+- Absorb a specific upstream PR with `git fetch upstream refs/pull/N/head && git cherry-pick -x
+  <sha>` (preserves the original author, we appear only as committer), record it in
+  [UPSTREAM_PRS.md](UPSTREAM_PRS.md), and open a PR whose title is a valid Conventional Commit
+  (e.g. `fix(wireguard_lwip): ... (upstream #N)`) -- the cherry-pick itself keeps upstream's
+  message; only the squash-merge title needs to be Conventional.
+
+## Integration into a Project
+
+Via the ESP Component Registry:
+
+```yaml
+# your_project/main/idf_component.yml
+dependencies:
+  fugo101/microlink:
+    version: "^3.0.0"
 ```
 
-The script:
-1. Fetches `upstream/main`
-2. Shows new commits
-3. Prompts confirmation
-4. Rebases `esp-idf-6x-compat` onto `upstream/main`
-5. Pushes with `--force-with-lease`
-
-If rebase conflicts occur (upstream changed a patched file):
-```bash
-# Resolve conflicts manually, then:
-git rebase --continue
-git push -f origin esp-idf-6x-compat
-```
-
-## Integration into a Project (vendor/ submodule pattern)
-
-```bash
-cd your-project
-mkdir -p vendor
-git submodule add -b main https://github.com/fudio101/microlink.git vendor/microlink
-ln -s ../vendor/microlink/components/microlink   components/microlink
-ln -s ../vendor/microlink/components/wireguard_lwip components/wireguard_lwip
-git add .gitmodules vendor/microlink components/microlink components/wireguard_lwip
-```
-(`esp-idf-6x-compat` was fast-forward merged into `main` on 2026-08-12 and is no longer needed —
-`main` already carries the ESP-IDF 6.x/mbedTLS 4.x/GCC 15 patches.)
+`fugo101/wireguard_lwip` comes along transitively -- never declare it yourself. See the README's
+Installation section for the `override_path` recipe used when developing against a local checkout
+of this repo instead of a published version.
 
 **Credentials.** `board_build.esp-idf.sdkconfig_extra` is **not a real PlatformIO option** — it is
 silently ignored, so a key placed in a separate "overlay" file this way is never applied. PlatformIO
