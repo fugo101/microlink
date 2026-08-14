@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manifest:
+    name: manifest validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Pip's idf-component-manager (3.x) has `compote manifest lint`, unlike the
+      # 2.5.0 bundled with ESP-IDF 6.0.1 (schema/create/add-dependency only) -- no
+      # need for the full ESP-IDF docker image just to validate a manifest.
+      - run: pip install idf-component-manager
+
+      - name: Lint manifest
+        run: compote manifest lint components/microlink/idf_component.yml
+
+      - name: Pack component (same validation the registry runs on upload)
+        run: compote -W component pack --project-dir components/microlink --name microlink
