@@ -1,0 +1,4 @@
+# Config-variant overlay for CI: exercises the zero-copy WireGuard receive
+# path (contributed by dj-oyu). Applied on top of basic_connect's own
+# sdkconfig.defaults -- see .github/workflows/ci.yml's config-variants job.
+CONFIG_ML_ZERO_COPY_WG=y

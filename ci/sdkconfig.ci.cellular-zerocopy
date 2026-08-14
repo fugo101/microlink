@@ -1,0 +1,6 @@
+# Config-variant overlay for CI: zero-copy WireGuard receive combined with
+# cellular, on top of cellular_connect's own sdkconfig.defaults (which
+# already has CONFIG_ML_ENABLE_CELLULAR=y). Catches interaction bugs between
+# the two features that neither one alone would surface.
+# See .github/workflows/ci.yml's config-variants job.
+CONFIG_ML_ZERO_COPY_WG=y

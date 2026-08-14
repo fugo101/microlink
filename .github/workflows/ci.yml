@@ -35,3 +35,71 @@ jobs:
 
       - name: Pack component (same validation the registry runs on upload)
         run: compote -W component pack --project-dir components/microlink --name microlink
+
+  examples:
+    name: "build ${{ matrix.example }} (${{ matrix.idf_version }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - basic_connect
+          - cellular_connect
+          - cellular_heartbeat
+          - failover_connect
+          - rebind_test
+        idf_version: [ v6.0.1 ]
+        include:
+          # Early warning for the next ESP-IDF minor release -- allowed to
+          # fail without turning the whole workflow red.
+          - example: basic_connect
+            idf_version: release-v6.0
+            continue_on_error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: espressif/esp-idf-ci-action@v1
+        continue-on-error: ${{ matrix.continue_on_error == true }}
+        with:
+          esp_idf_version: ${{ matrix.idf_version }}
+          target: esp32s3
+          path: "examples/${{ matrix.example }}"
+          command: "idf.py build"
+
+  config-variants:
+    name: "build ${{ matrix.variant }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each variant overlays ci/sdkconfig.ci.<variant> on top of an
+          # existing example's own sdkconfig.defaults. SDKCONFIG_DEFAULTS
+          # replaces the implicit default entirely, so the base file has to
+          # be listed again alongside the overlay.
+          - variant: zerocopy
+            base_example: basic_connect
+          - variant: minimal
+            base_example: basic_connect
+          - variant: cellular-zerocopy
+            base_example: cellular_connect
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Copy overlay into example dir
+        run: cp "ci/sdkconfig.ci.${{ matrix.variant }}" "examples/${{ matrix.base_example }}/sdkconfig.ci"
+
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0.1
+          target: esp32s3
+          path: "examples/${{ matrix.base_example }}"
+          # esp-idf-ci-action interpolates `command` inside a single-quoted
+          # bash -c '...' -- only double quotes are safe to use here.
+          command: "idf.py -DSDKCONFIG_DEFAULTS=\"sdkconfig.defaults;sdkconfig.ci\" build"
