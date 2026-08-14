@@ -1,0 +1,25 @@
+version: "3.0.0"  # x-release-please-version
+description: >-
+  Tailscale-protocol network stack for ESP32 (FuGo fork of CamM2325/microlink,
+  ESP-IDF 6.x only): ts2021 control plane, WireGuard data plane, DISCO/STUN,
+  DERP relay, optional 4G cellular with WiFi failover.
+url: https://github.com/fugo101/microlink
+repository: https://github.com/fugo101/microlink.git
+issues: https://github.com/fugo101/microlink/issues
+license: MIT
+tags: [tailscale, wireguard, vpn, networking, cellular]
+
+dependencies:
+  idf:
+    # Floor 6.0: src/ml_noise.c includes <mbedtls/private/chachapoly.h>, which
+    # only exists in the TF-PSA-Crypto tree shipped from ESP-IDF 6.0 onward.
+    # Ceiling <7.0: 6.x-specific compat has not been tested/patched for 7.x.
+    version: ">=6.0,<7.0"
+  espressif/cjson:
+    version: "^1.7.19"
+  fugo101/wireguard_lwip:
+    # Separate repo (fugo101/wireguard-lwip, a real fork of
+    # smartalock/wireguard-lwip), its own independent release-please --
+    # this version number has nothing to do with microlink's own version.
+    # Bump by hand when needed; there is no auto-sync between the two repos.
+    version: "^1.0.0"
