@@ -38,6 +38,16 @@ set(REQUIRES
     esp_http_server
 )
 
+if(CONFIG_ML_ENABLE_CELLULAR)
+    # ml_cellular.c / ml_at_socket.c include driver/uart.h and driver/gpio.h. On
+    # ESP-IDF 6.x those headers live in esp_driver_uart / esp_driver_gpio, not in
+    # the umbrella `driver` component above -- `driver` only PRIV_REQUIRES
+    # esp_driver_gpio (private, doesn't propagate) and doesn't require
+    # esp_driver_uart at all. Without these, any CONFIG_ML_ENABLE_CELLULAR=y
+    # build fails to find both headers.
+    list(APPEND REQUIRES esp_driver_uart esp_driver_gpio)
+endif()
+
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS
