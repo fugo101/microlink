@@ -6,7 +6,11 @@
 > ⚠️ **This copy has diverged substantially from upstream — any future sync is a manual merge, not
 > a fast-forward.** The most visible divergence: upstream's single `allowed_ip`/`allowed_mask` pair
 > was replaced with an `allowed_source_ips[WIREGUARD_MAX_SRC_IPS]` array, plus the ESP-IDF 6.x/GCC 15
-> patches above and `WG_DEBUG` logging throughout.
+> patches above and `WG_DEBUG` logging throughout. It also carries a fix absorbed from
+> [CamM2325/microlink#20](https://github.com/CamM2325/microlink/pull/20) (not present upstream at
+> smartalock/wireguard-lwip): decrypted RX is handed to `device->netif->input` instead of calling
+> `ip_input()` directly, so the lwIP core is only ever entered from `tcpip_thread` — see
+> `UPSTREAM_PRS.md` at the microlink repo root.
 >
 > **To check upstream for new fixes:**
 > ```bash
