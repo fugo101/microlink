@@ -34,7 +34,6 @@ set(REQUIRES
     mbedtls
     espressif__cjson
     driver
-    esp_driver_tsens
     esp_http_server
     # ml_cellular.c / ml_at_socket.c include driver/uart.h and driver/gpio.h. On
     # ESP-IDF 6.x those headers live in esp_driver_uart / esp_driver_gpio, not in
@@ -48,6 +47,13 @@ set(REQUIRES
     # in every environment tried (PlatformIO and real ESP-IDF Docker CI alike).
     esp_driver_uart
     esp_driver_gpio
+    # Same rule applies here: esp_driver_tsens must stay unconditional.
+    # CONFIG_SOC_TEMP_SENSOR_SUPPORTED isn't available yet at this point either,
+    # so gating this entry on it silently drops the requirement and breaks the
+    # build with "driver/temperature_sensor.h: No such file or directory" on
+    # every target -- the CONFIG_SOC_TEMP_SENSOR_SUPPORTED check in
+    # ml_config_httpd.c (post-Kconfig) is what actually gates the feature.
+    esp_driver_tsens
 )
 
 idf_component_register(
