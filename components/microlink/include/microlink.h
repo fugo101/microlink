@@ -143,17 +143,38 @@ esp_err_t microlink_rebind(microlink_t *ml);
 /**
  * @brief Stop and disconnect from Tailscale
  * @param ml Handle
- * @return ESP_OK on success
+ * @return ESP_OK once every worker task has exited,
+ *         ESP_ERR_TIMEOUT if one or more were still running when the join
+ *         window expired (the instance is still safe to destroy — see
+ *         microlink_destroy()).
  *
- * Gracefully shuts down all tasks and closes connections.
+ * Sets the shutdown request and waits for the worker tasks to acknowledge it
+ * by exiting. A worker wedged in a DNS lookup or TLS handshake on a captive
+ * network can outlast the window; that is reported, not fatal.
  */
 esp_err_t microlink_stop(microlink_t *ml);
 
 /**
  * @brief Destroy MicroLink instance and free all resources
  * @param ml Handle (NULL-safe)
+ *
+ * If a worker task outlived microlink_stop()'s join window the instance is
+ * NOT freed here — freeing it would be a use-after-free the moment that task
+ * touched the context again. It is parked instead, and released by a later
+ * microlink_reap_orphans() / microlink_init() / microlink_destroy() call once
+ * the task has actually exited. The caller drops its handle either way.
  */
 void microlink_destroy(microlink_t *ml);
+
+/**
+ * @brief Release any instance whose free microlink_destroy() had to defer
+ *
+ * Called automatically by microlink_init() and microlink_destroy(). Exposed
+ * for applications that tear MicroLink down and then stay idle for a while
+ * and want the memory back sooner. Safe to call from any task at any time;
+ * it frees nothing that is still in use.
+ */
+void microlink_reap_orphans(void);
 
 /**
  * @brief Get current connection state
