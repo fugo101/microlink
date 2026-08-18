@@ -69,6 +69,16 @@ menu "MicroLink V2 Configuration"
             The blob is PSRAM-backed in memory. Ensure your NVS partition is
             large enough for the configured value.
 
+    config ML_CONFIG_HTTPD
+        bool "Start the port-80 config web server"
+        default y
+        help
+            The config module always loads its NVS settings at init; this
+            option only controls the embedded HTTP server (web UI + REST).
+            Disabling saves ~7-8 KB of internal RAM (httpd task stack and
+            bookkeeping) on RAM-tight boards. With it off, provisioning a
+            fresh device needs a build with it on, or direct NVS writes.
+
     config ML_H2_BUFFER_SIZE_KB
         int "HTTP/2 receive buffer size (KB)"
         default 512

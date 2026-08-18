@@ -63,7 +63,10 @@ extern "C" {
 #define ML_WG_RX_QUEUE_DEPTH    8
 #define ML_STUN_RX_QUEUE_DEPTH  4
 #define ML_COORD_CMD_QUEUE_DEPTH 4
-#define ML_PEER_UPDATE_QUEUE_DEPTH 400
+/* Bounds in-flight peer-update payloads (each ~208 B, malloc'd internal by
+ * ml_net_io RX). 400 was underived and allowed a theoretical ~80 KB internal
+ * burst; 32 = 4x the runtime max_peers=8 and caps the burst at ~6.6 KB. */
+#define ML_PEER_UPDATE_QUEUE_DEPTH 32
 
 /* Protocol limits */
 #define ML_MAX_PEERS            CONFIG_ML_MAX_PEERS
