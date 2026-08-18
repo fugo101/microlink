@@ -181,6 +181,24 @@ typedef struct {
 #define ML_EVT_DERP_CONNECT_REQ     BIT8
 
 /* ============================================================================
+ * Worker Task Liveness
+ *
+ * One bit per task created by microlink_start(). The bit is set BEFORE
+ * xTaskCreate and cleared by the task itself, as its very last action, via
+ * ml_task_exit(). A zero mask is therefore *proof* that no worker can touch
+ * the context again — which is what microlink_destroy() gates the free on.
+ * See the "Teardown contract" comment at the top of microlink.c.
+ * Adapted from cplewes/microlink@a415d646.
+ * ========================================================================== */
+
+#define ML_TASK_BIT_NET_IO          (1u << 0)
+#define ML_TASK_BIT_DERP_TX         (1u << 1)
+#define ML_TASK_BIT_COORD           (1u << 2)
+#define ML_TASK_BIT_WG_MGR          (1u << 3)
+#define ML_TASK_BIT_ALL             (ML_TASK_BIT_NET_IO | ML_TASK_BIT_DERP_TX | \
+                                     ML_TASK_BIT_COORD  | ML_TASK_BIT_WG_MGR)
+
+/* ============================================================================
  * Queue Message Types
  * ========================================================================== */
 
@@ -347,6 +365,11 @@ struct microlink_s {
     TaskHandle_t coord_task;
     TaskHandle_t wg_mgr_task;
 
+    /* ML_TASK_BIT_* mask of workers that are still running. Set before
+     * xTaskCreate, cleared by each task's ml_task_exit(). Touched from both
+     * cores — access only through the __atomic helpers in microlink.c. */
+    uint32_t tasks_running;
+
     /* Queues */
     QueueHandle_t derp_tx_queue;        /* -> derp_tx task */
     QueueHandle_t disco_rx_queue;       /* net_io -> wg_mgr */
@@ -453,6 +476,23 @@ struct microlink_s {
 /* ============================================================================
  * Internal Function Declarations (per-module)
  * ========================================================================== */
+
+/* microlink.c — worker task lifecycle helpers */
+
+/** Current ML_TASK_BIT_* mask of running workers (0 = all joined). */
+uint32_t ml_tasks_running(const microlink_t *ml);
+
+/** True once ML_EVT_SHUTDOWN_REQUEST is set (or the context is gone).
+ *  Call this from anywhere a worker can block for more than a moment — a
+ *  DNS lookup, a TLS handshake retry, a backoff delay — so teardown does not
+ *  have to wait out the full network timeout. */
+bool ml_shutdown_pending(microlink_t *ml);
+
+/** Terminate the calling worker task. Clears its ML_TASK_BIT_* and never
+ *  returns. THE CONTEXT MUST NOT BE TOUCHED AFTER CALLING THIS — clearing the
+ *  bit is what licenses microlink_destroy() to free ml, its queues and its
+ *  event group. */
+void ml_task_exit(microlink_t *ml, uint32_t task_bit);
 
 /* ml_net_io.c */
 void ml_net_io_task(void *arg);
