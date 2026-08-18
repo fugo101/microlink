@@ -1425,6 +1425,16 @@ static void disco_periodic_probes(microlink_t *ml) {
     if (start >= ml->peer_count) start = 0;
 
     for (int n = 0; n < ml->peer_count; n++) {
+        /* Per-peer yield. On a large tailnet the full disco loop can run
+         * 50-170ms back-to-back with no yield point, starving other
+         * same-core tasks (wg_mgr shares core 1 with coord, per CLAUDE.md's
+         * task table) long enough to trip watchdogs on real hardware. A
+         * 1-tick yield between peers gives them scheduler time without
+         * measurably affecting DISCO cadence — the loop still completes
+         * within the same outer cycle, just with a shorter peak burst
+         * length. Adapted from cplewes/microlink@9f6af750. */
+        vTaskDelay(1);
+
         int i = (start + n) % ml->peer_count;
         ml_peer_t *p = &ml->peers[i];
         if (!p->active) continue;
