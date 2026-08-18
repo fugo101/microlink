@@ -65,6 +65,12 @@ typedef enum {
     ML_STATE_CONNECTED,
     ML_STATE_RECONNECTING,
     ML_STATE_ERROR,
+    /* Registration was rejected by the control plane (expired/revoked auth
+     * key, or the node awaits authorization). The stack keeps retrying at
+     * maximum backoff, but recovery normally needs a new auth key — hosts
+     * should surface this to the user as their equivalent of a "re-login"
+     * prompt (headless devices have no UI to notice it otherwise). */
+    ML_STATE_AUTH_FAILED,
 } microlink_state_t;
 
 /* Callback types */
