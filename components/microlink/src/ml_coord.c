@@ -687,6 +687,9 @@ static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
  * State: REGISTER - Send RegisterRequest, parse RegisterResponse
  * ========================================================================== */
 
+/* do_register: the control plane rejected our auth (vs. -1 = I/O error) */
+#define ML_REG_AUTH_FAILED (-2)
+
 static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
     int64_t t_reg_start = esp_timer_get_time();
 
@@ -714,7 +717,7 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
     cJSON *hostinfo = cJSON_CreateObject();
     const char *dev_name = (ml->config.device_name && ml->config.device_name[0]) ? ml->config.device_name : microlink_default_device_name();
     cJSON_AddStringToObject(hostinfo, "Hostname", dev_name);
-    cJSON_AddStringToObject(hostinfo, "OS", "linux");
+    cJSON_AddStringToObject(hostinfo, "OS", "esp32");
     cJSON_AddStringToObject(hostinfo, "OSVersion", "ESP-IDF");
     cJSON_AddStringToObject(hostinfo, "GoArch", "arm");
 
@@ -946,10 +949,24 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
     }
     /* The server reports a refused registration only in Error — a rejected auth
      * key gives "invalid key: unable to validate API key". Node is absent either
-     * way, so without this the first symptom is MapResponse "node not found". */
+     * way, so without this check a rejected registration looked like success
+     * and the client spun in the reconnect loop with a confusing downstream
+     * MapResponse "node not found" instead of a clear auth-failure signal. */
     const cJSON *reg_error = cJSON_GetObjectItem(resp_json, "Error");
     if (cJSON_IsString(reg_error) && reg_error->valuestring[0] != '\0') {
         ESP_LOGE(TAG, "RegisterResponse error: %s", reg_error->valuestring);
+        cJSON_Delete(resp_json);
+        parse_start[parse_len] = saved;
+        free(resp_buf);
+        return ML_REG_AUTH_FAILED;
+    }
+    const cJSON *machine_authorized = cJSON_GetObjectItem(resp_json, "MachineAuthorized");
+    if (cJSON_IsBool(machine_authorized) && !cJSON_IsTrue(machine_authorized)) {
+        ESP_LOGE(TAG, "Registration not authorized by control plane");
+        cJSON_Delete(resp_json);
+        parse_start[parse_len] = saved;
+        free(resp_buf);
+        return ML_REG_AUTH_FAILED;
     }
 
     parse_start[parse_len] = saved;
@@ -1337,7 +1354,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     cJSON *hostinfo = cJSON_CreateObject();
     const char *dev_name = (ml->config.device_name && ml->config.device_name[0]) ? ml->config.device_name : microlink_default_device_name();
     cJSON_AddStringToObject(hostinfo, "Hostname", dev_name);
-    cJSON_AddStringToObject(hostinfo, "OS", "linux");
+    cJSON_AddStringToObject(hostinfo, "OS", "esp32");
     cJSON_AddStringToObject(hostinfo, "OSVersion", "ESP-IDF");
     cJSON_AddStringToObject(hostinfo, "GoArch", "arm");
     cJSON_AddItemToObject(root, "Hostinfo", hostinfo);
@@ -1822,7 +1839,7 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise) {
     if (hostinfo) {
         const char *dev_name = (ml->config.device_name && ml->config.device_name[0]) ? ml->config.device_name : microlink_default_device_name();
         cJSON_AddStringToObject(hostinfo, "Hostname", dev_name);
-        cJSON_AddStringToObject(hostinfo, "OS", "linux");
+        cJSON_AddStringToObject(hostinfo, "OS", "esp32");
         cJSON_AddStringToObject(hostinfo, "OSVersion", "ESP-IDF");
         cJSON_AddStringToObject(hostinfo, "GoArch", "arm");
         cJSON_AddItemToObject(root, "Hostinfo", hostinfo);
@@ -1927,7 +1944,7 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     if (hostinfo) {
         const char *dev_name = (ml->config.device_name && ml->config.device_name[0]) ? ml->config.device_name : microlink_default_device_name();
         cJSON_AddStringToObject(hostinfo, "Hostname", dev_name);
-        cJSON_AddStringToObject(hostinfo, "OS", "linux");
+        cJSON_AddStringToObject(hostinfo, "OS", "esp32");
         cJSON_AddStringToObject(hostinfo, "OSVersion", "ESP-IDF");
         cJSON_AddStringToObject(hostinfo, "GoArch", "arm");
         cJSON_AddItemToObject(root, "Hostinfo", hostinfo);
@@ -2266,12 +2283,26 @@ void ml_coord_task(void *arg) {
 
         case COORD_REGISTER:
             ESP_LOGI(TAG, "Registering...");
-            if (do_register(ml, &noise) < 0) {
-                ESP_LOGE(TAG, "Registration failed");
-                ml_close_sock(ml->coord_sock);
-                ml->coord_sock = -1;
-                state = COORD_RECONNECTING;
-                break;
+            {
+                int reg_rc = do_register(ml, &noise);
+                if (reg_rc < 0) {
+                    ESP_LOGE(TAG, "Registration failed");
+                    if (reg_rc == ML_REG_AUTH_FAILED) {
+                        /* Not transient: retrying with the same key will keep
+                         * failing. Notify the host (its "re-login" prompt) and
+                         * jump to max backoff — the loop keeps running in case
+                         * the key is re-enabled server-side. */
+                        ml->state = ML_STATE_AUTH_FAILED;
+                        if (ml->state_cb) {
+                            ml->state_cb(ml, ML_STATE_AUTH_FAILED, ml->state_cb_data);
+                        }
+                        reconnect_attempts = 5;
+                    }
+                    ml_close_sock(ml->coord_sock);
+                    ml->coord_sock = -1;
+                    state = COORD_RECONNECTING;
+                    break;
+                }
             }
             state = COORD_FETCH_PEERS;
             break;
@@ -2503,6 +2534,10 @@ void ml_coord_task(void *arg) {
                                 break;
                             } else {
                                 ESP_LOGE(TAG, "Key expired but no auth_key — manual re-provisioning needed!");
+                                ml->state = ML_STATE_AUTH_FAILED;
+                                if (ml->state_cb) {
+                                    ml->state_cb(ml, ML_STATE_AUTH_FAILED, ml->state_cb_data);
+                                }
                             }
                         }
                         /* Warn 1 hour before expiry (rough uptime-based check) */
@@ -2560,7 +2595,18 @@ void ml_coord_task(void *arg) {
                 ESP_LOGI(TAG, "Reconnecting in %lu ms (attempt %d)",
                          (unsigned long)backoff_ms, reconnect_attempts + 1);
 
-                ml->state = ML_STATE_RECONNECTING;
+                /* Notify the host on the first entry into this state (a
+                 * backoff wait re-enters this case repeatedly, so only fire
+                 * once per reconnect cycle). Don't overwrite AUTH_FAILED —
+                 * that's a "needs a new key" state the host should keep
+                 * showing across retries, not something a plain reconnect
+                 * attempt should paper over. */
+                if (ml->state != ML_STATE_RECONNECTING && ml->state != ML_STATE_AUTH_FAILED) {
+                    ml->state = ML_STATE_RECONNECTING;
+                    if (ml->state_cb) {
+                        ml->state_cb(ml, ML_STATE_RECONNECTING, ml->state_cb_data);
+                    }
+                }
 
                 /* Wait on command queue with backoff timeout (interruptible!) */
                 ml_coord_cmd_t wake_cmd;
