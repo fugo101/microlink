@@ -603,10 +603,15 @@ skip_bsd_socket:
     ml_coord_cmd_t cmd = ML_CMD_CONNECT;
     xQueueSend(ml->coord_cmd_queue, &cmd, 0);
 
-    /* Start HTTP config server (binds port 80, serves config page + REST API) */
+    /* Start HTTP config server (binds port 80, serves config page + REST API).
+     * ML_CONFIG_HTTPD=n skips only the server: ml_config_httpd_init() already
+     * loaded the NVS settings above, so a provisioned device runs normally and
+     * keeps the ~7-8 KB of internal RAM the httpd task would pin. */
+#if CONFIG_ML_CONFIG_HTTPD
     if (ml->config_httpd) {
         ml_config_httpd_start(ml->config_httpd, ml);
     }
+#endif
 
     ESP_LOGI(TAG, "All tasks started");
     return ESP_OK;
