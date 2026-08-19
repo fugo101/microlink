@@ -1,4 +1,4 @@
-version: "3.1.0"  # x-release-please-version
+version: "3.1.1"  # x-release-please-version
 description: >-
   Tailscale-protocol network stack for ESP32 (FuGo fork of CamM2325/microlink,
   ESP-IDF 6.x only): ts2021 control plane, WireGuard data plane, DISCO/STUN,

@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.1.1](https://github.com/fugo101/microlink/compare/v3.1.0...v3.1.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **kconfig:** make ML_CONFIG_HTTPD properly depend on ML_ENABLE_CONFIG_HTTPD ([#71](https://github.com/fugo101/microlink/issues/71)) ([f9d8630](https://github.com/fugo101/microlink/commit/f9d86303d36036b789aad00bda4476631cd1c95b))
+
+
+### Documentation
+
+* configure agent skills (issue tracker + domain docs) ([#70](https://github.com/fugo101/microlink/issues/70)) ([1c502b6](https://github.com/fugo101/microlink/commit/1c502b67fdacf74061a27c6249b7e9130999b21f))
+* **microlink:** add component-root README for registry publish ([#68](https://github.com/fugo101/microlink/issues/68)) ([29a0af2](https://github.com/fugo101/microlink/commit/29a0af2dc98a5224cfcd310aeef1af7272558233))
+
 ## [3.1.0](https://github.com/fugo101/microlink/compare/v3.0.0...v3.1.0) (2026-08-19)
 
 
