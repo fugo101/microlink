@@ -69,16 +69,6 @@ menu "MicroLink V2 Configuration"
             The blob is PSRAM-backed in memory. Ensure your NVS partition is
             large enough for the configured value.
 
-    config ML_CONFIG_HTTPD
-        bool "Start the port-80 config web server"
-        default y
-        help
-            The config module always loads its NVS settings at init; this
-            option only controls the embedded HTTP server (web UI + REST).
-            Disabling saves ~7-8 KB of internal RAM (httpd task stack and
-            bookkeeping) on RAM-tight boards. With it off, provisioning a
-            fresh device needs a build with it on, or direct NVS writes.
-
     config ML_H2_BUFFER_SIZE_KB
         int "HTTP/2 receive buffer size (KB)"
         default 512
@@ -313,6 +303,21 @@ menu "MicroLink V2 Configuration"
                 Settings persist in NVS across reboots. The peer allowlist
                 controls which peers receive outbound DISCO probes — on large
                 tailnets this prevents wg_mgr flooding and reduces latency.
+
+        config ML_CONFIG_HTTPD
+            bool "Start the port-80 config web server"
+            depends on ML_ENABLE_CONFIG_HTTPD
+            default y
+            help
+                Only takes effect when ML_ENABLE_CONFIG_HTTPD is also on (this
+                option is hidden/forced off in menuconfig otherwise). That
+                option compiles the config module in or out entirely; this one
+                only controls whether the embedded HTTP server (web UI + REST)
+                actually starts listening on port 80. NVS settings still load
+                either way. Disabling saves ~7-8 KB of internal RAM (httpd
+                task stack and bookkeeping) on RAM-tight boards. With it off,
+                provisioning a fresh device needs a build with it on, or
+                direct NVS writes.
 
         config ML_CONFIG_MAX_ALLOWED_PEERS
             int "Maximum peers in allowlist"
