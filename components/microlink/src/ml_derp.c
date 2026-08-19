@@ -193,7 +193,12 @@ static esp_err_t derp_recv_frame_header(microlink_t *ml, uint8_t *type,
 static int derp_tls_write_all(microlink_t *ml, const uint8_t *data, size_t len) {
     size_t written = 0;
     int retries = 0;
-    const int max_retries = 50;  /* 50 * 10ms = 500ms max */
+    /* 500ms was too tight: the caller treats any -1 here as fatal and forces
+     * a full DERP reconnect, so a single congested write used to trigger a
+     * reconnect storm. WANT_READ/WANT_WRITE/TIMEOUT are transient backpressure,
+     * not real errors -- give them 3s before giving up. Genuine mbedtls errors
+     * (the other branch below) still bail out on the first try. */
+    const int max_retries = 300;  /* 300 * 10ms = 3s max */
 
     while (written < len) {
         int ret = mbedtls_ssl_write(&ml->derp.ssl, data + written, len - written);
@@ -238,20 +243,30 @@ static int derp_write_frame(microlink_t *ml, uint8_t type,
 /* Send a packet to a peer via DERP */
 static int derp_send_packet(microlink_t *ml, const uint8_t *dest_key,
                               const uint8_t *data, size_t len) {
-    /* SendPacket frame: 32-byte dest key + payload */
-    size_t frame_len = 32 + len;
-    uint8_t *frame = malloc(frame_len);
-    if (!frame) return -1;
+    /* SendPacket frame built as one buffer (5-byte header + 32-byte dest
+     * key + payload) instead of going through derp_write_frame's separate
+     * header write + payload write -- one malloc, one TLS write, halving
+     * the syscall/TLS-record count on this hot path. */
+    size_t payload_len = 32 + len;
+    size_t total_len = 5 + payload_len;
+    uint8_t *buf = ml_psram_malloc(total_len);
+    if (!buf) return -1;
 
-    memcpy(frame, dest_key, 32);
-    memcpy(frame + 32, data, len);
+    buf[0] = DERP_FRAME_SEND_PACKET;
+    buf[1] = (payload_len >> 24) & 0xFF;
+    buf[2] = (payload_len >> 16) & 0xFF;
+    buf[3] = (payload_len >> 8) & 0xFF;
+    buf[4] = payload_len & 0xFF;
+    memcpy(buf + 5, dest_key, 32);
+    memcpy(buf + 5 + 32, data, len);
 
-    int ret = derp_write_frame(ml, DERP_FRAME_SEND_PACKET, frame, frame_len);
+    int wrote = derp_tls_write_all(ml, buf, total_len);
+    int ret = (wrote < 0) ? -1 : 0;
     if (ret < 0) {
         ESP_LOGW(TAG, "derp_send_packet FAILED: dest=%02x%02x%02x%02x len=%d",
                  dest_key[0], dest_key[1], dest_key[2], dest_key[3], (int)len);
     }
-    free(frame);
+    free(buf);
     return ret;
 }
 
@@ -589,13 +604,16 @@ void ml_derp_tx_task(void *arg) {
             continue;
         }
 
+        bool did_work = false;
+
         /* ---- Phase 1: Drain TX queue FIRST (prioritize outgoing) ---- */
         {
-            for (int tx_count = 0; tx_count < 8; tx_count++) {
+            for (int tx_count = 0; tx_count < 32; tx_count++) {
                 ml_derp_tx_item_t item;
                 if (xQueueReceive(ml->derp_tx_queue, &item, 0) != pdTRUE) {
                     break;
                 }
+                did_work = true;
                 if (!ml->derp.connected) {
                     free(item.data);
                     continue;
@@ -626,10 +644,11 @@ void ml_derp_tx_task(void *arg) {
         /* ---- Phase 2: Poll for incoming DERP frames ---- */
         {
             int burst;
-            for (burst = 0; burst < 4; burst++) {
+            for (burst = 0; burst < 32; burst++) {
                 int ret = poll_derp_read(ml);
                 if (ret > 0) {
                     frames_rx++;
+                    did_work = true;
                     ml->derp.last_recv_ms = ml_get_time_ms();
                 } else if (ret == 0) {
                     break;  /* No more data / timeout */
@@ -642,8 +661,16 @@ void ml_derp_tx_task(void *arg) {
             }
         }
 
-        /* Yield briefly */
-        vTaskDelay(pdMS_TO_TICKS(1));
+        /* pdMS_TO_TICKS(1) rounds down to 0 ticks at this project's 100Hz
+         * tick rate, so the old unconditional delay never actually paced
+         * an idle loop -- it spun at full speed polling a non-blocking
+         * socket. Only yield the CPU when there was nothing to do; when
+         * genuinely idle, back off for real. */
+        if (did_work) {
+            taskYIELD();
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
 
     /* Release the TLS state, the socket and anything still queued for TX.
@@ -970,6 +997,11 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         struct timeval io_tv = { .tv_sec = 0, .tv_usec = 100000 };  /* 100ms */
         ml_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
         ml_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
+        /* Nagle's algorithm would coalesce our own already-small DERP frames
+         * with an up-to-500ms delay waiting for more data -- pure added
+         * latency on a link the app layer already keeps busy. */
+        int nodelay = 1;
+        ml_setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
     }
 
     /* ========================================================
