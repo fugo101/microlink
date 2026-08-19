@@ -34,8 +34,13 @@
 
 static const char *TAG = "ml_derp";
 
-/* Timeout for DERP connection handshake operations */
-#define DERP_CONNECT_TIMEOUT_MS  10000
+/* Timeout for DERP connection handshake operations. Bumped 10s -> 25s:
+ * on a lossy/high-latency captive network (healthspot) the TLS handshake
+ * itself was observed taking ~7.5s and occasionally exceeding 10s under
+ * retransmits, tripping "TLS handshake failed: timed out" -> full-retry
+ * thrash. 25s lets a slow-but-valid handshake complete. Steady-state
+ * frame polling still uses a 200ms read timeout (set after connect). */
+#define DERP_CONNECT_TIMEOUT_MS  25000
 
 /* ============================================================================
  * Custom BIO callbacks for TLS I/O
@@ -838,7 +843,19 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
     mbedtls_ssl_set_bio(&ml->derp.ssl, &ml->derp.sockfd,
                          ml_derp_bio_send, ml_derp_bio_recv, NULL);
 
-    /* TLS handshake - socket has 10s SO_RCVTIMEO from connect phase. */
+    /* Resume a prior TLS session if we saved one from a previous DERP
+     * connection (saved_session survives derp_free_tls_state across a reco).
+     * A resumed handshake skips ECDHE -> sub-second instead of ~7.5s. */
+    if (ml->derp.have_saved_session) {
+        int sret = mbedtls_ssl_set_session(&ml->derp.ssl, &ml->derp.saved_session);
+        if (sret == 0) {
+            ESP_LOGI(TAG, "DERP TLS: resuming saved session");
+        } else {
+            ESP_LOGW(TAG, "DERP TLS: set_session -0x%04x, doing full handshake", -sret);
+        }
+    }
+
+    /* TLS handshake - socket has SO_RCVTIMEO from connect phase. */
     int ret;
     while ((ret = mbedtls_ssl_handshake(&ml->derp.ssl)) != 0) {
         if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -861,6 +878,21 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
     int64_t t_derp_tls = esp_timer_get_time();
     ESP_LOGI(TAG, "[TIMING] DERP TLS handshake: %lld ms", (t_derp_tls - t_derp_tcp) / 1000);
     ESP_LOGI(TAG, "TLS connected to DERP");
+
+    /* Save the negotiated session so the NEXT reconnect can resume it and
+     * skip the expensive full handshake. get_session deep-copies the ticket,
+     * so free any prior copy first. Best-effort: on failure we just do a full
+     * handshake next time. */
+    if (ml->derp.have_saved_session) {
+        mbedtls_ssl_session_free(&ml->derp.saved_session);
+        ml->derp.have_saved_session = false;
+    }
+    mbedtls_ssl_session_init(&ml->derp.saved_session);
+    if (mbedtls_ssl_get_session(&ml->derp.ssl, &ml->derp.saved_session) == 0) {
+        ml->derp.have_saved_session = true;
+    } else {
+        mbedtls_ssl_session_free(&ml->derp.saved_session);
+    }
 
     /* HTTP Upgrade: GET /derp with Upgrade: DERP header */
     char upgrade_req[256];
