@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.2](https://github.com/fugo101/microlink/compare/v3.1.1...v3.1.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **coord:** persist vpn_ip in NVS to survive elided Node.Addresses ([#73](https://github.com/fugo101/microlink/issues/73)) ([61a1264](https://github.com/fugo101/microlink/commit/61a12640900a69ccbde6555f690d45aa836206fd)), closes [#72](https://github.com/fugo101/microlink/issues/72)
+
 ## [3.1.1](https://github.com/fugo101/microlink/compare/v3.1.0...v3.1.1) (2026-08-19)
 
 
