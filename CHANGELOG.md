@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.2.0](https://github.com/fugo101/microlink/compare/v3.1.2...v3.2.0) (2026-08-19)
+
+
+### Features
+
+* **coord:** consolidate H2 recv/JSON buffers into one dynamically-sized window ([#75](https://github.com/fugo101/microlink/issues/75)) ([802944c](https://github.com/fugo101/microlink/commit/802944caa0a9d6160ae4d86909ba725c6d8276a0))
+
+
+### Bug Fixes
+
+* **derp:** retry-forever backoff + RX-liveness watchdog for the DERP task ([#78](https://github.com/fugo101/microlink/issues/78)) ([065940f](https://github.com/fugo101/microlink/commit/065940f2e170ad45b56f3b63c636bf03230cf440))
+* **wg:** move magicsock TX pbuf allocation to SPIRAM ([#77](https://github.com/fugo101/microlink/issues/77)) ([0d6b4d5](https://github.com/fugo101/microlink/commit/0d6b4d55afe1cc4e792fad3d45cd03e1aaebbcb3))
+
+
+### Documentation
+
+* **fork-prs:** mark [#23](https://github.com/fugo101/microlink/issues/23) done, drop resolved conflict notes ([#80](https://github.com/fugo101/microlink/issues/80)) ([1a9261a](https://github.com/fugo101/microlink/commit/1a9261a808014f6068fa2f4fc854675726961cb2))
+* **fork-prs:** mark [#39](https://github.com/fugo101/microlink/issues/39) decided-not-to-port ([#79](https://github.com/fugo101/microlink/issues/79)) ([957de74](https://github.com/fugo101/microlink/commit/957de741c4088ea3a14300a46292a30493493e72))
+
 ## [3.1.2](https://github.com/fugo101/microlink/compare/v3.1.1...v3.1.2) (2026-08-19)
 
 
