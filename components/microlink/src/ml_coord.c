@@ -1005,7 +1005,11 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
             if (addr) {
                 unsigned a, b, c, d;
                 if (sscanf(addr, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-                    ml->vpn_ip = (a << 24) | (b << 16) | (c << 8) | d;
+                    uint32_t new_ip = (a << 24) | (b << 16) | (c << 8) | d;
+                    if (new_ip != ml->vpn_ip) {
+                        ml->vpn_ip = new_ip;
+                        ml_save_vpn_ip_nvs(ml->vpn_ip);
+                    }
                     char ip_str[16];
                     microlink_ip_to_str(ml->vpn_ip, ip_str);
                     ESP_LOGI(TAG, "Our VPN IP: %s", ip_str);
@@ -1721,6 +1725,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
                         unsigned a, b, c, d;
                         if (sscanf(addr, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
                             ml->vpn_ip = (a << 24) | (b << 16) | (c << 8) | d;
+                            ml_save_vpn_ip_nvs(ml->vpn_ip);
                             char ip_str[16];
                             microlink_ip_to_str(ml->vpn_ip, ip_str);
                             ESP_LOGI(TAG, "Our VPN IP: %s", ip_str);
@@ -2216,6 +2221,7 @@ static int poll_map_update(microlink_t *ml, ml_noise_state_t *noise) {
                         uint32_t new_ip = (a << 24) | (b << 16) | (c << 8) | d;
                         if (new_ip != ml->vpn_ip) {
                             ml->vpn_ip = new_ip;
+                            ml_save_vpn_ip_nvs(ml->vpn_ip);
                             ESP_LOGI(TAG, "VPN IP updated via long-poll");
                         }
                     }
