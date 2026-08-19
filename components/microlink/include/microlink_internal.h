@@ -90,6 +90,12 @@ extern "C" {
 #define ML_DISCO_TRUST_DURATION_MS      15000
 #define ML_DISCO_PING_TIMEOUT_MS        5000
 #define ML_DISCO_UPGRADE_INTERVAL_MS    15000
+/* Cap for the per-peer direct-path upgrade backoff. On a P2P-hostile network
+ * (e.g. healthspot blocks peer-to-peer UDP) direct-path upgrades NEVER
+ * succeed, so re-probing every 15s forever is pure waste (CPU + DERP TX). We
+ * double each peer's upgrade interval on every failed attempt up to this cap,
+ * resetting to the base interval when a direct path DOES establish. */
+#define ML_DISCO_UPGRADE_BACKOFF_MAX_MS 300000
 #define ML_DISCO_SESSION_ACTIVE_MS      45000
 
 /* STUN servers (Tailscale primary, Google fallback) */
@@ -279,6 +285,7 @@ typedef struct {
     uint64_t trust_until_ms;        /* Direct path trusted until */
     uint64_t last_send_ms;          /* Last data sent to this peer */
     uint64_t last_upgrade_ms;       /* Last path upgrade attempt */
+    uint32_t upgrade_interval_ms;   /* Current direct-path upgrade backoff (grows on repeated failure, resets on success) */
 
     /* Best direct path */
     uint32_t best_ip;
@@ -343,6 +350,15 @@ typedef struct {
     int sockfd;                     /* Raw TCP socket */
     mbedtls_ssl_context ssl;        /* TLS context (owned exclusively by DERP I/O task) */
     mbedtls_ssl_config ssl_conf;
+    /* Saved TLS session for resumption across DERP reconnects. On a flaky
+     * network DERP drops+reconnects a lot; without this every reconnect paid
+     * the full ~7.5s handshake. mbedTLS client session tickets are enabled
+     * (CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS) and tailscale's derper
+     * supports resumption, so a resumed handshake skips ECDHE -> sub-second.
+     * Best-effort: if the ticket expired the server falls back to a full
+     * handshake transparently. */
+    mbedtls_ssl_session saved_session;
+    bool have_saved_session;
     bool connected;
     uint64_t last_recv_ms;          /* For keepalive watchdog */
 } ml_derp_conn_t;

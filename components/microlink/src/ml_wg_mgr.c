@@ -462,6 +462,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     p->trust_until_ms = 0;
     p->last_send_ms = 0;
     p->last_upgrade_ms = 0;
+    p->upgrade_interval_ms = ML_DISCO_UPGRADE_INTERVAL_MS;
     p->has_direct_path = false;
     p->best_ip = 0;
     p->best_port = 0;
@@ -934,6 +935,9 @@ static void process_disco_pong(microlink_t *ml, const ml_rx_packet_t *pkt,
             p->best_port = pkt->src_port;
             p->has_direct_path = true;
             p->trust_until_ms = now + ML_DISCO_TRUST_DURATION_MS;
+            /* Direct path established -> reset the upgrade backoff so a later
+             * loss + re-probe starts fast again. */
+            p->upgrade_interval_ms = ML_DISCO_UPGRADE_INTERVAL_MS;
 
             /* Update WireGuard endpoint to direct path.
              * Always update the stored endpoint. Only force a handshake if we
@@ -1475,11 +1479,20 @@ static void disco_periodic_probes(microlink_t *ml) {
         /* Probe for direct path upgrade (every UPGRADE_INTERVAL when on DERP).
          * Skip on cellular: direct paths impossible through carrier-grade NAT.
          * Throttled to DISCO_PROBES_PER_TICK to spread load and reduce jitter. */
+        uint32_t up_interval = p->upgrade_interval_ms ? p->upgrade_interval_ms
+                                                       : ML_DISCO_UPGRADE_INTERVAL_MS;
         if (!ml_at_socket_is_ready() && !p->has_direct_path &&
-            now - p->last_upgrade_ms > ML_DISCO_UPGRADE_INTERVAL_MS) {
+            now - p->last_upgrade_ms > up_interval) {
             if (upgrade_probes_sent < DISCO_PROBES_PER_TICK) {
                 disco_send_ping_to_peer(ml, i, false);
                 p->last_upgrade_ms = now;
+                /* Back off: this upgrade attempt is (so far) unanswered. Double
+                 * the interval up to the cap so a P2P-hostile network doesn't
+                 * make us re-probe every 15s forever. A direct pong resets it
+                 * to the base interval (see the DISCO pong handler). */
+                uint32_t next = up_interval * 2;
+                if (next > ML_DISCO_UPGRADE_BACKOFF_MAX_MS) next = ML_DISCO_UPGRADE_BACKOFF_MAX_MS;
+                p->upgrade_interval_ms = next;
                 upgrade_probes_sent++;
             }
         }
