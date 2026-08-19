@@ -559,6 +559,11 @@ bool ml_shutdown_pending(microlink_t *ml);
  *  event group. */
 void ml_task_exit(microlink_t *ml, uint32_t task_bit);
 
+/** Persist the current VPN IP to NVS so a reboot survives a registration
+ *  where the control plane omits Node.Addresses for an already-known node
+ *  (see issue #72). Best-effort; failures are not fatal. */
+void ml_save_vpn_ip_nvs(uint32_t vpn_ip);
+
 /* ml_net_io.c */
 void ml_net_io_task(void *arg);
 

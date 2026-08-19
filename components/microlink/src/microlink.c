@@ -35,6 +35,7 @@ static const char *TAG = "microlink";
 #define NVS_KEY_WG_PUB      "wg_public"
 #define NVS_KEY_DISCO_PRI   "disco_pri"
 #define NVS_KEY_DISCO_PUB   "disco_pub"
+#define NVS_KEY_VPN_IP      "vpn_ip"
 
 /* X25519 from x25519.h */
 #include "x25519.h"
@@ -110,8 +111,32 @@ static esp_err_t load_or_generate_keys(microlink_t *ml) {
         ESP_LOGI(TAG, "Keys loaded from NVS");
     }
 
+    /* Restore the last-known VPN IP. On a repeat registration of an
+     * already-known node, the control plane may omit Node.Addresses in both
+     * RegisterResponse and the initial MapResponse (see issue #72), leaving
+     * vpn_ip stuck at 0 despite the session otherwise working. */
+    uint32_t saved_vpn_ip = 0;
+    size_t vpn_ip_len = sizeof(saved_vpn_ip);
+    if (nvs_get_blob(nvs, NVS_KEY_VPN_IP, &saved_vpn_ip, &vpn_ip_len) == ESP_OK &&
+        vpn_ip_len == sizeof(saved_vpn_ip) && saved_vpn_ip != 0) {
+        ml->vpn_ip = saved_vpn_ip;
+        char ip_str[16];
+        microlink_ip_to_str(ml->vpn_ip, ip_str);
+        ESP_LOGI(TAG, "VPN IP restored from NVS: %s", ip_str);
+    }
+
     nvs_close(nvs);
     return ESP_OK;
+}
+
+void ml_save_vpn_ip_nvs(uint32_t vpn_ip) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    nvs_set_blob(nvs, NVS_KEY_VPN_IP, &vpn_ip, sizeof(vpn_ip));
+    nvs_commit(nvs);
+    nvs_close(nvs);
 }
 
 /* ============================================================================
