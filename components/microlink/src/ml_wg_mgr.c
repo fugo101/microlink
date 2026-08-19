@@ -209,11 +209,48 @@ typedef struct {
     uint8_t data[];
 } wg_tx_defer_t;
 
+/* Custom pbuf wrapping a SPIRAM-backed payload for the WG magicsock TX path.
+ * lwIP's PBUF_RAM pool lives in internal DRAM and fragments under sustained
+ * high packet rate (observed ~140pps causing periodic mem_malloc failure on
+ * ~1312-byte WG packets); this moves the per-packet payload to SPIRAM.
+ *
+ * Uses PBUF_RAW as the layer (not PBUF_TRANSPORT): pbuf_add_header() (the
+ * non-forced call every TX path uses) unconditionally fails for PBUF_REF-type
+ * pbufs regardless of reserved headroom -- only pbuf_header_force(), which
+ * lwIP only calls on RX, respects it. udp_send() already falls back to
+ * chaining a small PBUF_RAM header pbuf in front of a PBUF_REF payload on
+ * every send either way, so reserving header space in this buffer would be
+ * dead weight -- and computing that reservation by hand is exactly what
+ * caused a corrupted-offset bug in the source fork this was ported from.
+ * Ported from Csontikka/microlink's `f1de3143`, simplified after verifying
+ * against lwIP's pbuf.c/udp.c (see FORK_PRS.md #33). */
+typedef struct {
+    struct pbuf_custom pc;
+    void *payload_mem;
+} ml_spiram_pbuf_t;
+
+static void ml_spiram_pbuf_free_fn(struct pbuf *p) {
+    ml_spiram_pbuf_t *wrap = (ml_spiram_pbuf_t *)p;
+    heap_caps_free(wrap->payload_mem);
+    heap_caps_free(wrap);
+}
+
+static struct pbuf *wg_alloc_tx_pbuf(const uint8_t *data, uint16_t len) {
+    ml_spiram_pbuf_t *wrap = heap_caps_malloc(sizeof(*wrap), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!wrap) return NULL;
+    wrap->payload_mem = ml_psram_malloc(len);
+    if (!wrap->payload_mem) { heap_caps_free(wrap); return NULL; }
+    memcpy(wrap->payload_mem, data, len);
+    wrap->pc.custom_free_function = ml_spiram_pbuf_free_fn;
+    struct pbuf *p = pbuf_alloced_custom(PBUF_RAW, len, PBUF_REF, &wrap->pc, wrap->payload_mem, len);
+    if (!p) { heap_caps_free(wrap->payload_mem); heap_caps_free(wrap); return NULL; }
+    return p;
+}
+
 static void wg_send_in_tcpip(void *arg) {
     wg_tx_defer_t *d = (wg_tx_defer_t *)arg;
-    struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, d->len, PBUF_RAM);
+    struct pbuf *p = wg_alloc_tx_pbuf(d->data, d->len);
     if (p) {
-        memcpy(p->payload, d->data, d->len);
         udp_sendto(d->pcb, p, &d->dst, d->port);
         pbuf_free(p);
     }
@@ -241,9 +278,8 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
     ip4_addr_set_u32(ip_2_ip4(&dst), dest_ip);  /* already network byte order */
 
     if (sys_thread_tcpip(LWIP_CORE_LOCK_QUERY_HOLDER)) {
-        struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+        struct pbuf *p = wg_alloc_tx_pbuf(data, (uint16_t)len);
         if (!p) return ERR_MEM;
-        memcpy(p->payload, data, len);
         err_t err = udp_sendto(s_wg_output_pcb, p, &dst, dest_port);
         pbuf_free(p);
         return err;
