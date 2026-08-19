@@ -132,3 +132,13 @@ echo "ping" | nc -u <ESP32_VPN_IP> 9000 # UDP echo test
 - `CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY` does not exist in recent ESP-IDF — use `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL` instead
 - WiFi power save must be disabled (`WIFI_PS_NONE`) for low-latency WireGuard traffic
 - Auth keys must be **reusable** for development (single-use keys expire after first registration)
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as GitHub Issues in this repo's `origin` (fugo101/microlink), using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (created lazily as decisions are made). See `docs/agents/domain.md`.
