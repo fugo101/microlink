@@ -198,6 +198,33 @@ uint32_t microlink_get_vpn_ip(const microlink_t *ml);
 int microlink_get_peer_count(const microlink_t *ml);
 
 /**
+ * @brief Route tailnet-range traffic through a peer when no more specific
+ *        route exists
+ * @param ml Handle
+ * @param peer_vpn_ip Peer VPN IP in host byte order, or 0 to clear
+ * @return ESP_OK on success
+ *
+ * The peer table is bounded by CONFIG_ML_MAX_PEERS, so a device may need to
+ * reach a tailnet member it doesn't itself track. Marking a peer here makes
+ * it a fallback router for destinations inside the tailnet CGNAT range
+ * (100.64.0.0/10) that don't match a more specific peer's own /32 route.
+ * This does NOT make the marked peer a default gateway: it has no effect on
+ * general internet-bound traffic, and existing peer-specific /32 routes are
+ * always preferred over the fallback.
+ */
+esp_err_t microlink_set_exit_node(microlink_t *ml, uint32_t peer_vpn_ip);
+
+/**
+ * @brief Get the underlying WireGuard lwIP netif
+ * @param ml Handle
+ * @return Opaque lwIP netif pointer, or NULL if WireGuard is not ready
+ *
+ * Advanced integrations (e.g. source-based routing) can use this to steer
+ * selected traffic into the VPN tunnel.
+ */
+void *microlink_get_netif_impl(const microlink_t *ml);
+
+/**
  * @brief Get peer info by index
  * @param ml Handle
  * @param index Peer index (0 to peer_count-1)

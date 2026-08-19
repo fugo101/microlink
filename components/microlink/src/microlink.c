@@ -829,6 +829,28 @@ int microlink_get_peer_count(const microlink_t *ml) {
     return ml ? ml->peer_count : 0;
 }
 
+esp_err_t microlink_set_exit_node(microlink_t *ml, uint32_t peer_vpn_ip) {
+    if (!ml) return ESP_ERR_INVALID_ARG;
+    if (!ml->peer_update_queue) return ESP_ERR_INVALID_STATE;
+
+    ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+    if (!update) return ESP_ERR_NO_MEM;
+
+    update->action = ML_PEER_SET_EXIT_NODE;
+    update->vpn_ip = peer_vpn_ip;
+
+    if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+        free(update);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    return ESP_OK;
+}
+
+void *microlink_get_netif_impl(const microlink_t *ml) {
+    return ml ? ml->wg_netif : NULL;
+}
+
 esp_err_t microlink_get_peer_info(const microlink_t *ml, int index, microlink_peer_info_t *info) {
     if (!ml || !info || index < 0 || index >= ml->peer_count) {
         return ESP_ERR_INVALID_ARG;

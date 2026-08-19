@@ -441,6 +441,84 @@ static int find_peer_by_disco_key(microlink_t *ml, const uint8_t *disco_key) {
     return -1;
 }
 
+/* Reprogram a single already-added peer's allowed_source_ips[0]: 0.0.0.0/0
+ * if it's the configured tailnet-range fallback peer, /32 otherwise. Mirrors
+ * add_peer()'s initial allowed_ip logic below for the case where the peer
+ * is (re)designated as the fallback route after it was already added. */
+static void wg_program_peer_route(microlink_t *ml, ml_peer_t *peer) {
+    if (!ml || !peer || !ml->wg_netif || peer->wg_peer_index < 0) {
+        return;
+    }
+
+    struct netif *netif = (struct netif *)ml->wg_netif;
+    struct wireguard_device *dev = (struct wireguard_device *)netif->state;
+    if (!dev || peer->wg_peer_index >= WIREGUARD_MAX_PEERS) {
+        return;
+    }
+
+    struct wireguard_peer *wg_peer = &dev->peers[peer->wg_peer_index];
+    memset(wg_peer->allowed_source_ips, 0, sizeof(wg_peer->allowed_source_ips));
+
+    if (ml->exit_node_ip != 0 && peer->vpn_ip == ml->exit_node_ip) {
+        ip_addr_set_any(false, &wg_peer->allowed_source_ips[0].ip);
+        ip_addr_set_any(false, &wg_peer->allowed_source_ips[0].mask);
+        wg_peer->allowed_source_ips[0].valid = true;
+        ESP_LOGI(TAG, "Peer %s set as tailnet-range fallback route", peer->hostname);
+        return;
+    }
+
+    uint8_t ip_a = (peer->vpn_ip >> 24) & 0xFF;
+    uint8_t ip_b = (peer->vpn_ip >> 16) & 0xFF;
+    uint8_t ip_c = (peer->vpn_ip >> 8) & 0xFF;
+    uint8_t ip_d = peer->vpn_ip & 0xFF;
+    IP4_ADDR(&wg_peer->allowed_source_ips[0].ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
+    IP4_ADDR(&wg_peer->allowed_source_ips[0].mask.u_addr.ip4, 255, 255, 255, 255);
+    wg_peer->allowed_source_ips[0].ip.type = IPADDR_TYPE_V4;
+    wg_peer->allowed_source_ips[0].mask.type = IPADDR_TYPE_V4;
+    wg_peer->allowed_source_ips[0].valid = true;
+}
+
+/* Designate (or clear, if peer_vpn_ip == 0) the tailnet-range fallback peer.
+ * Deliberately does NOT widen the WG netif's own netmask -- it stays at the
+ * tailnet /10 always (set once in wg_init_interface()), so only destinations
+ * actually inside the tailnet CGNAT range ever route through WireGuard at
+ * all. Only the designated peer's own allowed_ip widens to 0.0.0.0/0, making
+ * it a fallback route within that range for peers not in our own table --
+ * general internet-bound traffic is never affected either way. */
+static void wg_apply_exit_node(microlink_t *ml, uint32_t peer_vpn_ip) {
+    ml->exit_node_ip = peer_vpn_ip;
+
+    char ip_str[16];
+    if (peer_vpn_ip != 0) {
+        microlink_ip_to_str(peer_vpn_ip, ip_str);
+        ESP_LOGI(TAG, "Applying tailnet-range fallback route via %s", ip_str);
+    } else {
+        ESP_LOGI(TAG, "Clearing tailnet-range fallback route");
+    }
+
+    for (int i = 0; i < ml->peer_count; i++) {
+        if (!ml->peers[i].active) {
+            continue;
+        }
+        wg_program_peer_route(ml, &ml->peers[i]);
+    }
+
+    /* Programming allowed_ip=0.0.0.0/0 on the peer above only makes it a
+     * fallback route -- it does NOT by itself establish a WireGuard session
+     * with it. Our own TCP/UDP API paths (ml_tcp.c/ml_udp.c) always call
+     * ml_wg_mgr_trigger_handshake() before sending; a fallback-routed packet
+     * for some OTHER peer does not go through that path, so if the fallback
+     * peer has never handshaken with us -- e.g. it's only reachable via
+     * DERP, where the one-shot direct-pong handshake kick in
+     * process_disco_pong() never fires -- no session ever forms and any
+     * packet relying on the fallback route silently dies with "No valid
+     * keys!" inside wireguard-lwip. Explicitly kick a handshake (DERP +
+     * direct-if-known) so the fallback peer actually has a live session. */
+    if (peer_vpn_ip != 0) {
+        ml_wg_mgr_trigger_handshake(ml, peer_vpn_ip);
+    }
+}
+
 static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
      * Still process updates for existing peers (they may become allowed later). */
@@ -552,19 +630,25 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
         wg_peer.public_key = peer_b64;
         wg_peer.preshared_key = NULL;
 
-        /* Allowed IP: PEER's VPN IP
+        /* Allowed IP: PEER's VPN IP (or 0.0.0.0/0 if this peer is the
+         * configured tailnet-range fallback route, see wg_program_peer_route()).
          * wireguard-lwip uses allowed_ip for TWO purposes:
          * 1. Outbound routing: peer_lookup_by_allowed_ip() matches DESTINATION
          *    IP to find which peer to route to (wireguardif.c:338)
          * 2. Inbound validation: checks decrypted packet SOURCE IP matches
          *    peer's allowed_source_ips (wireguardif.c:507)
          * Must be set to the PEER's VPN IP for both to work correctly. */
-        uint8_t ip_a = (p->vpn_ip >> 24) & 0xFF;
-        uint8_t ip_b = (p->vpn_ip >> 16) & 0xFF;
-        uint8_t ip_c = (p->vpn_ip >> 8) & 0xFF;
-        uint8_t ip_d = p->vpn_ip & 0xFF;
-        IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
-        IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
+        if (ml->exit_node_ip != 0 && p->vpn_ip == ml->exit_node_ip) {
+            ip_addr_set_any(false, &wg_peer.allowed_ip);
+            ip_addr_set_any(false, &wg_peer.allowed_mask);
+        } else {
+            uint8_t ip_a = (p->vpn_ip >> 24) & 0xFF;
+            uint8_t ip_b = (p->vpn_ip >> 16) & 0xFF;
+            uint8_t ip_c = (p->vpn_ip >> 8) & 0xFF;
+            uint8_t ip_d = p->vpn_ip & 0xFF;
+            IP4_ADDR(&wg_peer.allowed_ip.u_addr.ip4, ip_a, ip_b, ip_c, ip_d);
+            IP4_ADDR(&wg_peer.allowed_mask.u_addr.ip4, 255, 255, 255, 255);
+        }
 
         /* Leave the endpoint BLANK: data output goes via DERP until DISCO
          * validates a direct path (Tailscale semantics). Pre-installing
@@ -588,6 +672,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
 
         if (wg_err == ERR_OK && wg_peer_idx != WIREGUARDIF_INVALID_INDEX) {
             p->wg_peer_index = wg_peer_idx;
+            wg_program_peer_route(ml, p);
 
             /* Verify the WG internal peer key matches what we passed */
             struct wireguard_device *dev = (struct wireguard_device *)netif->state;
@@ -716,6 +801,9 @@ static void process_peer_updates(microlink_t *ml) {
                              p->hostname, p->endpoint_count, p->derp_region);
                 }
             }
+            break;
+        case ML_PEER_SET_EXIT_NODE:
+            wg_apply_exit_node(ml, update->vpn_ip);
             break;
         }
         free(update);
@@ -1723,6 +1811,7 @@ void ml_wg_mgr_task(void *arg) {
 
     uint64_t last_disco_probe_ms = 0;
     uint64_t last_wg_periodic_ms = 0;
+    uint64_t last_exit_node_check_ms = 0;
     bool derp_was_connected = false;
     bool stun_cmm_sent = false;  /* One-shot: send CMMs after first STUN result */
 
@@ -1818,6 +1907,28 @@ void ml_wg_mgr_task(void *arg) {
             uint64_t dt = ml_get_time_ms() - t0;
             last_disco_probe_ms = now;
             ESP_LOGI(TAG, "disco_periodic_probes: %llu ms", (unsigned long long)dt);
+        }
+
+        /* Safety net: make sure the configured tailnet-range fallback peer
+         * actually has a live WG session. Fallback-routed traffic for some
+         * OTHER peer goes through raw wireguardif_output(), which never
+         * calls ml_wg_mgr_trigger_handshake() the way our own TCP/UDP API
+         * paths do -- so if the initial kick in wg_apply_exit_node() raced
+         * DERP startup, or the session later dropped, nothing else would
+         * ever re-trigger it and fallback-routed traffic would silently die
+         * with no session to send on. */
+        now = ml_get_time_ms();
+        if (ml->exit_node_ip != 0 && ml->wg_netif && now - last_exit_node_check_ms > 5000) {
+            last_exit_node_check_ms = now;
+            int exit_idx = find_peer_by_ip(ml, ml->exit_node_ip);
+            if (exit_idx >= 0 && ml->peers[exit_idx].wg_peer_index >= 0) {
+                err_t is_up = wireguardif_peer_is_up((struct netif *)ml->wg_netif,
+                                                       (u8_t)ml->peers[exit_idx].wg_peer_index,
+                                                       NULL, NULL);
+                if (is_up != ERR_OK) {
+                    ml_wg_mgr_trigger_handshake(ml, ml->exit_node_ip);
+                }
+            }
         }
 
         /* Yield - 10ms loop rate for minimum packet processing latency.
