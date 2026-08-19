@@ -181,6 +181,37 @@ static err_t wg_derp_output_cb(const uint8_t *peer_public_key,
  * on that thread. */
 static struct udp_pcb *s_wg_output_pcb = NULL;
 
+/* [wg_udp_output_cb thread-safety] This callback has two callers running on
+ * different tasks: data packets arrive via ip4_output -> wireguardif_output
+ * on tcpip_thread, while handshakes/keepalives call it directly from
+ * ml_wg_mgr. CONFIG_LWIP_TCPIP_CORE_LOCKING is disabled, so raw APIs such as
+ * udp_sendto() may only be used by one thread; concurrent use from two tasks
+ * corrupts the heap. Same bug class as upstream PR #20 (that one was an RX
+ * path calling ip_input from the wrong task; this is the TX equivalent).
+ * microlink already has the correct pattern for this in ml_zerocopy.c
+ * (tcpip_callback for thread safety) — follow that shape here, using
+ * tcpip_try_callback (drop-on-full instead of blocking the caller) since
+ * handshakes/keepalives are small (<=148B) and seconds apart, so a pool
+ * isn't justified. */
+typedef struct {
+    struct udp_pcb *pcb;
+    ip_addr_t dst;
+    uint16_t port;
+    uint16_t len;
+    uint8_t data[];
+} wg_tx_defer_t;
+
+static void wg_send_in_tcpip(void *arg) {
+    wg_tx_defer_t *d = (wg_tx_defer_t *)arg;
+    struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, d->len, PBUF_RAM);
+    if (p) {
+        memcpy(p->payload, d->data, d->len);
+        udp_sendto(d->pcb, p, &d->dst, d->port);
+        pbuf_free(p);
+    }
+    free(d);
+}
+
 static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
                                 const uint8_t *data, size_t len, void *ctx) {
     microlink_t *ml = (microlink_t *)ctx;
@@ -195,20 +226,33 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
              (int)dest_port,
              len >= 1 ? data[0] : -1);
 
-    /* Use raw PCB to send — safe from any thread context */
     if (!s_wg_output_pcb) return ERR_CONN;
-
-    struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
-    if (!p) return ERR_MEM;
-    memcpy(p->payload, data, len);
 
     ip_addr_t dst;
     IP_SET_TYPE_VAL(dst, IPADDR_TYPE_V4);
     ip4_addr_set_u32(ip_2_ip4(&dst), dest_ip);  /* already network byte order */
 
-    err_t err = udp_sendto(s_wg_output_pcb, p, &dst, dest_port);
-    pbuf_free(p);
-    return err;
+    if (sys_thread_tcpip(LWIP_CORE_LOCK_QUERY_HOLDER)) {
+        struct pbuf *p = pbuf_alloc(PBUF_TRANSPORT, len, PBUF_RAM);
+        if (!p) return ERR_MEM;
+        memcpy(p->payload, data, len);
+        err_t err = udp_sendto(s_wg_output_pcb, p, &dst, dest_port);
+        pbuf_free(p);
+        return err;
+    }
+
+    wg_tx_defer_t *d = (wg_tx_defer_t *)malloc(sizeof(*d) + len);
+    if (!d) return ERR_MEM;
+    d->pcb = s_wg_output_pcb;
+    d->dst = dst;
+    d->port = dest_port;
+    d->len = (uint16_t)len;
+    memcpy(d->data, data, len);
+    if (tcpip_try_callback(wg_send_in_tcpip, d) != ERR_OK) {
+        free(d);
+        return ERR_MEM;
+    }
+    return ERR_OK;
 }
 
 /* ============================================================================
@@ -244,6 +288,17 @@ static esp_err_t wg_init_interface(microlink_t *ml) {
         free(netif);
         return ESP_FAIL;
     }
+
+    /* Tailscale-standard MTU, replacing wireguardif's default 1420.
+     *
+     * 1420 advertises TCP MSS 1380 -> peer sends 1420B inner packets -> +60B
+     * WG encap +28B IP/UDP = 1508B on the wire, over the WiFi MTU of 1500 ->
+     * the sender fragments, and esp-idf lwIP has IP reassembly disabled by
+     * default, so every fragmented packet is silently dropped (large TCP
+     * downlinks crawl while small uplink packets flow fine). 1280 is what
+     * Tailscale itself uses (macOS utun MTU = 1280), leaving 1280+60+28 =
+     * 1368 on the wire - safe margin. */
+    netif->mtu = 1280;
 
     /* Set IP addresses: our VPN IP (or temporary until we get one) */
     if (ml->vpn_ip != 0) {
@@ -986,19 +1041,15 @@ static void process_disco_pong(microlink_t *ml, const ml_rx_packet_t *pkt,
                         /* Store endpoint so wireguardif_connect sends to it */
                         wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index,
                                                      &ep_ip, pkt->src_port);
-                        /* Fire one handshake init but don't leave peer active.
-                         * wireguardif_connect sets active=true internally, so
-                         * we immediately clear it after to prevent retries. */
+                        /* Fire the handshake init via wireguardif_connect().
+                         * Do NOT clear peer->active afterward: active is not a
+                         * "retry switch", it's the master gate wireguardif.c
+                         * checks before a peer may initiate a session at all.
+                         * Clearing it here meant no session could ever be
+                         * established with this peer — permanently blackholed
+                         * on the direct path. tried_initial_handshake above is
+                         * what actually bounds this to a one-shot attempt. */
                         wireguardif_connect(netif, (u8_t)p->wg_peer_index);
-                        /* Clear active to prevent infinite retry loop.
-                         * If handshake succeeds, the response handler will
-                         * establish the session regardless of active flag. */
-                        {
-                            struct wireguard_device *dev = (struct wireguard_device *)netif->state;
-                            if (dev && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
-                                dev->peers[p->wg_peer_index].active = false;
-                            }
-                        }
                         ESP_LOGI(TAG, "WG one-shot handshake to %s (first direct path)", p->hostname);
                     }
                 }
