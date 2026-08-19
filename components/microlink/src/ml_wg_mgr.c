@@ -1018,11 +1018,40 @@ static void process_disco_pong(microlink_t *ml, const ml_rx_packet_t *pkt,
                     uint32_t cur_ip_u32 = ip4_addr_get_u32(ip_2_ip4(&cur_ip));
                     uint32_t new_ip_u32 = htonl(pkt->src_ip);
                     if (cur_ip_u32 != new_ip_u32 || cur_port != pkt->src_port) {
-                        wireguardif_connect(netif, (u8_t)p->wg_peer_index);
-                        ESP_LOGI(TAG, "WG endpoint SWITCHED to direct: %d.%d.%d.%d:%d for %s",
-                                 (int)((pkt->src_ip >> 24) & 0xFF), (int)((pkt->src_ip >> 16) & 0xFF),
-                                 (int)((pkt->src_ip >> 8) & 0xFF), (int)(pkt->src_ip & 0xFF),
-                                 (int)pkt->src_port, p->hostname);
+                        /* NAT-rebind fix: a peer behind carrier-grade NAT can
+                         * flip its public port every 30-60s, generating a
+                         * steady stream of endpoint-changed PONGs. Unconditionally
+                         * re-handshaking on every flip stalls TX for the full
+                         * handshake RTT each time. wireguardif_update_endpoint()
+                         * above already retargeted peer->ip:port, and WireGuard
+                         * authenticates by key (not endpoint), so the existing
+                         * keypair still decrypts correctly from the new address.
+                         * Only force a fresh handshake when the encrypted data
+                         * path is ALSO stale (no RX in 5s) -- at that point the
+                         * keypair may genuinely be out of sync. */
+                        struct wireguard_device *dev = (struct wireguard_device *)netif->state;
+                        uint32_t last_rx_age_ms = 0xFFFFFFFF;
+                        if (dev && p->wg_peer_index < WIREGUARD_MAX_PEERS) {
+                            struct wireguard_peer *wp = &dev->peers[p->wg_peer_index];
+                            if (wp->last_rx) {
+                                uint32_t now_wg = wireguard_sys_now();
+                                uint32_t age = now_wg - wp->last_rx;
+                                last_rx_age_ms = (age > 0x7FFFFFFFu) ? 0 : age;
+                            }
+                        }
+                        bool data_alive = (last_rx_age_ms < 5000);
+                        if (data_alive) {
+                            ESP_LOGI(TAG, "WG endpoint port flip (NAT-rebind) for %s; "
+                                          "data alive (last_rx=%ums), reusing keypair (no handshake)",
+                                     p->hostname, (unsigned)last_rx_age_ms);
+                        } else {
+                            wireguardif_connect(netif, (u8_t)p->wg_peer_index);
+                            ESP_LOGI(TAG, "WG endpoint SWITCHED to direct: %d.%d.%d.%d:%d for %s "
+                                          "(last_rx=%ums, forcing handshake)",
+                                     (int)((pkt->src_ip >> 24) & 0xFF), (int)((pkt->src_ip >> 16) & 0xFF),
+                                     (int)((pkt->src_ip >> 8) & 0xFF), (int)(pkt->src_ip & 0xFF),
+                                     (int)pkt->src_port, p->hostname, (unsigned)last_rx_age_ms);
+                        }
                     }
                 } else {
                     ESP_LOGI(TAG, "WG endpoint stored (no session): %d.%d.%d.%d:%d for %s",
@@ -1504,28 +1533,65 @@ static void disco_periodic_probes(microlink_t *ml) {
         bool peer_allowed = ml_config_peer_is_allowed(
             ml->config_httpd, p->vpn_ip);
 
-        /* Check if direct path trust has expired (always runs, not throttled) */
+        /* Check if direct path trust has expired (always runs, not throttled).
+         *
+         * Under heavy AP+STA radio contention, DISCO PINGs starve much sooner
+         * than the encrypted WG data path. Unconditionally reverting to DERP
+         * on PING silence would zero peer->ip:port for every active peer at
+         * once even though data is still flowing on the direct endpoint,
+         * forcing them all onto the single shared DERP TCP socket. So: check
+         * the WG layer's own last_rx before deciding. If encrypted data is
+         * still flowing (< 30s old), keep the direct endpoint and just clear
+         * has_direct_path so the upgrade probe re-fires, plus one extra PING
+         * to recover trust faster than the heartbeat would. Only fall back to
+         * DERP when the data path is ALSO stale. */
         if (p->has_direct_path && now > p->trust_until_ms) {
-            ESP_LOGI(TAG, "Direct path to %s expired, reverting to DERP", p->hostname);
+            uint32_t last_rx_age_ms = 0xFFFFFFFF;
+            if (ml->wg_netif && p->wg_peer_index >= 0 &&
+                p->wg_peer_index < WIREGUARD_MAX_PEERS) {
+                struct netif *netif = (struct netif *)ml->wg_netif;
+                struct wireguard_device *dev = (struct wireguard_device *)netif->state;
+                if (dev) {
+                    struct wireguard_peer *wp = &dev->peers[p->wg_peer_index];
+                    if (wp->last_rx) {
+                        uint32_t now_wg = wireguard_sys_now();
+                        uint32_t age = now_wg - wp->last_rx;
+                        last_rx_age_ms = (age > 0x7FFFFFFFu) ? 0 : age;
+                    }
+                }
+            }
+
+            bool data_flowing = (last_rx_age_ms < 30000);
             p->has_direct_path = false;
 
             /* Only do DERP fallback + re-probe for allowed peers.
              * Non-allowed peers just get their state cleaned above. */
             if (peer_allowed) {
-                /* Re-initiate DERP handshake only if we have an active WG session. */
-                if (ml->wg_netif && p->wg_peer_index >= 0) {
-                    struct netif *netif = (struct netif *)ml->wg_netif;
-                    err_t is_up = wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index,
-                                                           NULL, NULL);
-                    if (is_up == ERR_OK) {
-                        wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
-                        ESP_LOGI(TAG, "  WG session active, falling back to DERP for %s", p->hostname);
+                if (data_flowing) {
+                    ESP_LOGI(TAG, "Direct path PING-stale for %s but data flowing "
+                                  "(last_rx=%ums) - keeping endpoint, single PING",
+                             p->hostname, (unsigned)last_rx_age_ms);
+                    if (!ml_at_socket_is_ready()) {
+                        disco_send_ping_to_peer(ml, i, true);
                     }
-                }
+                } else {
+                    ESP_LOGI(TAG, "Direct path to %s expired (last_rx=%ums), reverting to DERP",
+                             p->hostname, (unsigned)last_rx_age_ms);
+                    /* Re-initiate DERP handshake only if we have an active WG session. */
+                    if (ml->wg_netif && p->wg_peer_index >= 0) {
+                        struct netif *netif = (struct netif *)ml->wg_netif;
+                        err_t is_up = wireguardif_peer_is_up(netif, (u8_t)p->wg_peer_index,
+                                                               NULL, NULL);
+                        if (is_up == ERR_OK) {
+                            wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
+                            ESP_LOGI(TAG, "  WG session active, falling back to DERP for %s", p->hostname);
+                        }
+                    }
 
-                /* Force-ping to try re-establishing direct path (WiFi only) */
-                if (!ml_at_socket_is_ready()) {
-                    disco_send_ping_to_peer(ml, i, true);
+                    /* Force-ping to try re-establishing direct path (WiFi only) */
+                    if (!ml_at_socket_is_ready()) {
+                        disco_send_ping_to_peer(ml, i, true);
+                    }
                 }
             }
         }
