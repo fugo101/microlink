@@ -604,6 +604,8 @@ skip_bsd_socket:
     xQueueSend(ml->coord_cmd_queue, &cmd, 0);
 
     /* Start HTTP config server (binds port 80, serves config page + REST API).
+     * ML_CONFIG_HTTPD now depends on ML_ENABLE_CONFIG_HTTPD in Kconfig, so
+     * this block only ever starts the server when both are on.
      * ML_CONFIG_HTTPD=n skips only the server: ml_config_httpd_init() already
      * loaded the NVS settings above, so a provisioned device runs normally and
      * keeps the ~7-8 KB of internal RAM the httpd task would pin. */
