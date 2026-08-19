@@ -616,6 +616,7 @@ esp_err_t ml_peer_nvs_init(void);
 void ml_peer_nvs_deinit(void);
 esp_err_t ml_peer_nvs_save(const ml_peer_t *peer);
 int ml_peer_nvs_load_all(ml_peer_t *peers, int max_peers);
+esp_err_t ml_peer_nvs_remove(const uint8_t public_key[32]);
 esp_err_t ml_peer_nvs_clear(void);
 
 #ifdef CONFIG_ML_ZERO_COPY_WG
