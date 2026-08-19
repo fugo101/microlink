@@ -131,6 +131,16 @@ extern "C" {
 #define ML_CTRL_WATCHDOG_MS             120000
 #define ML_CTRL_BACKOFF_MAX_MS          30000
 #define ML_CTRL_KEEPALIVE_MS            60000
+/* Stream-liveness watchdog: the mapSession sends a KeepAlive MapResponse
+ * roughly every minute, so this allows ~5 consecutive misses before
+ * declaring the session dead. Deliberately much longer than
+ * ML_CTRL_WATCHDOG_MS -- that one guards the whole transport (resets on
+ * any inbound frame, including PONGs to our own PINGs); this one guards
+ * the map stream specifically, so a front end that keeps the HTTP/2
+ * connection alive can't hide a server-side mapSession that's already
+ * gone (node shows "offline" in the admin console for hours while
+ * transport health looks fine). */
+#define ML_CTRL_STREAM_STALE_MS         300000
 
 /* Large tailnet buffer sizes (PSRAM-allocated, configurable via menuconfig) */
 #define ML_H2_BUFFER_SIZE       (CONFIG_ML_H2_BUFFER_SIZE_KB * 1024)
@@ -439,6 +449,15 @@ struct microlink_s {
     /* Coordination socket (owned exclusively by coord task) */
     int coord_sock;
     uint32_t h2_next_stream_id;         /* Next H2 stream ID for endpoint updates (odd, starts at 7) */
+    /* ml_get_time_ms() of the most recent DATA frame received on the
+     * long-poll map stream (H2 stream 5) specifically -- real MapResponses
+     * and the ~60s mapSession keepalives, nothing else. Unlike the
+     * COORD_LONG_POLL loop's transport-level activity clock (which any
+     * inbound frame, PING/PONG/SETTINGS included, also resets), this keeps
+     * climbing when a front end/load balancer keeps the HTTP/2 connection
+     * alive while the server-side mapSession is already gone. See
+     * ML_CTRL_STREAM_STALE_MS. */
+    volatile uint64_t ctrl_stream_rx_ms;
 
     /* WireGuard netif (owned exclusively by wg_mgr task) */
     void *wg_netif;
