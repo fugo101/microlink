@@ -56,6 +56,11 @@ jobs:
           - example: basic_connect
             idf_version: release-v6.0
             continue_on_error: true
+          # idf_component.yml declares idf: ">=6.0,<7.0" -- without this cell
+          # the <7.0 ceiling is untested against the actual next minor.
+          - example: basic_connect
+            idf_version: release-v6.1
+            continue_on_error: true
     steps:
       - uses: actions/checkout@v7
         with:
