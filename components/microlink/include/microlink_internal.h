@@ -269,6 +269,7 @@ typedef struct {
         ML_PEER_ADD,
         ML_PEER_REMOVE,
         ML_PEER_UPDATE_ENDPOINT,
+        ML_PEER_SET_EXIT_NODE,
     } action;
     uint32_t vpn_ip;
     uint8_t public_key[32];
@@ -462,6 +463,10 @@ struct microlink_s {
 
     /* WireGuard netif (owned exclusively by wg_mgr task) */
     void *wg_netif;
+
+    /* VPN IP of the peer configured as tailnet-range fallback route (0 = none).
+     * Owned exclusively by wg_mgr task; set only via ML_PEER_SET_EXIT_NODE. */
+    volatile uint32_t exit_node_ip;
 
     /* Peers (owned exclusively by wg_mgr task) */
     ml_peer_t peers[ML_MAX_PEERS];
