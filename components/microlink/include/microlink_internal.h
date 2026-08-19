@@ -142,9 +142,11 @@ extern "C" {
  * transport health looks fine). */
 #define ML_CTRL_STREAM_STALE_MS         300000
 
-/* Large tailnet buffer sizes (PSRAM-allocated, configurable via menuconfig) */
+/* Large tailnet buffer size (PSRAM-allocated, configurable via menuconfig).
+ * Ceiling for the single H2-receive-and-JSON-parse buffer in do_fetch_peers()
+ * -- ml->h2_rx_window_size is clamped to this at connect time based on free
+ * heap (see choose_h2_rx_window_size() in ml_coord.c). */
 #define ML_H2_BUFFER_SIZE       (CONFIG_ML_H2_BUFFER_SIZE_KB * 1024)
-#define ML_JSON_BUFFER_SIZE     (CONFIG_ML_JSON_BUFFER_SIZE_KB * 1024)
 
 /* Noise protocol */
 #define ML_NOISE_KEY_LEN        32
@@ -451,6 +453,9 @@ struct microlink_s {
     /* Coordination socket (owned exclusively by coord task) */
     int coord_sock;
     uint32_t h2_next_stream_id;         /* Next H2 stream ID for endpoint updates (odd, starts at 7) */
+    /* Runtime H2 recv/JSON-parse window, chosen per connect cycle by
+     * choose_h2_rx_window_size() from free heap; never exceeds ML_H2_BUFFER_SIZE. */
+    uint32_t h2_rx_window_size;
     /* ml_get_time_ms() of the most recent DATA frame received on the
      * long-poll map stream (H2 stream 5) specifically -- real MapResponses
      * and the ~60s mapSession keepalives, nothing else. Unlike the
@@ -617,7 +622,7 @@ int ml_h2_build_headers_frame(uint8_t *out, size_t out_size,
 int ml_h2_build_data_frame(uint8_t *out, size_t out_size,
                             const uint8_t *data, size_t data_len,
                             uint32_t stream_id, bool end_stream);
-int ml_h2_build_preface(uint8_t *out, size_t out_size);
+int ml_h2_build_preface(uint8_t *out, size_t out_size, uint32_t window_size);
 int ml_h2_build_settings_ack(uint8_t *out, size_t out_size);
 int ml_h2_build_window_update(uint8_t *out, size_t out_size,
                                uint32_t stream_id, uint32_t increment);

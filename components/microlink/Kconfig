@@ -74,8 +74,16 @@ menu "MicroLink V2 Configuration"
         default 512
         range 64 2048
         help
-            Size of the PSRAM-allocated buffer for receiving HTTP/2 frames
-            from the Tailscale control plane (MapResponse).
+            Ceiling for the single PSRAM-allocated buffer used to both
+            receive HTTP/2 frames from the Tailscale control plane
+            (MapResponse) and hold the extracted JSON for parsing --
+            the JSON is compacted in place into the same buffer, so no
+            separate JSON buffer is allocated.
+
+            At connect time this is further clamped down to whatever's
+            actually available in free heap (see ml_coord.c's
+            choose_h2_rx_window_size()), so actual usage is often less
+            than this ceiling.
 
             The initial MapResponse contains all peers in your tailnet.
             Each peer is roughly 1-2KB of JSON. After the initial response,
@@ -85,19 +93,6 @@ menu "MicroLink V2 Configuration"
             - 512:  ~300 peers (default, most deployments)
             - 1024: ~600 peers (large enterprise tailnets)
             - 2048: ~1200 peers (very large tailnets, requires 8MB PSRAM)
-
-    config ML_JSON_BUFFER_SIZE_KB
-        int "JSON parse buffer size (KB)"
-        default 512
-        range 64 2048
-        help
-            Size of the PSRAM-allocated buffer for parsing JSON MapResponse
-            data. cJSON builds an in-memory DOM tree that uses 2-3x the
-            raw JSON size, so this should be at least as large as the
-            HTTP/2 buffer.
-
-            Match this to ML_H2_BUFFER_SIZE_KB unless you have a reason
-            to set them differently.
 
     menu "Cellular Modem"
 

@@ -655,15 +655,41 @@ static void process_proactive_frames(microlink_t *ml, ml_noise_state_t *noise) {
  * State: H2_PREFACE - Send HTTP/2 connection preface (Noise-encrypted)
  * ========================================================================== */
 
+/* Choose the H2 recv/JSON-parse window for this connect cycle: the largest
+ * contiguous free block we can find (SPIRAM preferred, internal as fallback),
+ * minus a safety margin, clamped to [64KB, ML_H2_BUFFER_SIZE] and rounded
+ * down to 1KB. do_fetch_peers() allocates exactly one buffer this size and
+ * uses it for both the raw H2 receive and the compacted JSON -- keeping this
+ * window under what's actually free avoids fragmenting the rest of PSRAM on
+ * RAM-constrained boards. Ported from djorr5/microlink's `67b230b2`. */
+static void choose_h2_rx_window_size(microlink_t *ml) {
+    size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    size_t internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    size_t largest_any = psram_largest > internal_largest ? psram_largest : internal_largest;
+
+    const size_t margin = 32 * 1024;
+    const size_t floor = 64 * 1024;
+    size_t window = (largest_any > margin) ? (largest_any - margin) : 0;
+    if (window < floor) window = floor;
+    if (window > ML_H2_BUFFER_SIZE) window = ML_H2_BUFFER_SIZE;
+    window &= ~(size_t)1023;  /* round down to 1KB */
+
+    ml->h2_rx_window_size = (uint32_t)window;
+    ESP_LOGI(TAG, "H2 rx window: %luKB (largest free block %luKB, ceiling %luKB)",
+             (unsigned long)(window / 1024), (unsigned long)(largest_any / 1024),
+             (unsigned long)(ML_H2_BUFFER_SIZE / 1024));
+}
+
 static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
     int64_t t_h2_start = esp_timer_get_time();
+    uint32_t h2_window = ml->h2_rx_window_size ? ml->h2_rx_window_size : ML_H2_BUFFER_SIZE;
 
     /* Build H2 preface (24+6=30) + SETTINGS with INITIAL_WINDOW_SIZE (9+6=15)
      * + SETTINGS_ACK (9) + connection-level WINDOW_UPDATE (13) = 67 bytes */
     uint8_t h2_init[128];
     int pos = 0;
 
-    int preface_len = ml_h2_build_preface(h2_init, sizeof(h2_init));
+    int preface_len = ml_h2_build_preface(h2_init, sizeof(h2_init), h2_window);
     if (preface_len < 0) return -1;
     pos = preface_len;
 
@@ -675,7 +701,7 @@ static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
      * beyond the 65535 default. SETTINGS INITIAL_WINDOW_SIZE only sets per-stream
      * window; the connection-level window starts at 65535 and must be explicitly
      * expanded with WINDOW_UPDATE on stream 0. */
-    uint32_t conn_window_delta = ML_H2_BUFFER_SIZE - 65535;
+    uint32_t conn_window_delta = h2_window - 65535;
     if (conn_window_delta > 0) {
         int wu_len = ml_h2_build_window_update(h2_init + pos, sizeof(h2_init) - pos,
                                                 0, conn_window_delta);
@@ -689,7 +715,7 @@ static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
     }
 
     ESP_LOGI(TAG, "H2 preface sent (%d bytes, conn window=%luKB)",
-             pos, (unsigned long)(ML_H2_BUFFER_SIZE / 1024));
+             pos, (unsigned long)(h2_window / 1024));
 
     /* Read and process server's response (SETTINGS, SETTINGS_ACK, WINDOW_UPDATE, etc.) */
     uint8_t recv_buf[4096];
@@ -1495,13 +1521,22 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     /* Read MapResponse - accumulate ALL decrypted Noise frames first, then parse H2.
      * This is critical because a single H2 frame can span multiple Noise frames
      * (v1 does the same with h2_buffer).
-     * Smart timeout: extend to 60s for large tailnets (300+ peers = 240KB+). */
-    uint8_t *h2_recv = ml_psram_malloc(ML_H2_BUFFER_SIZE);  /* 512KB for 300+ peer tailnets */
+     * Smart timeout: extend to 60s for large tailnets (300+ peers = 240KB+).
+     *
+     * Single PSRAM buffer for both the raw H2 receive and the compacted JSON --
+     * once all frames are accumulated, DATA payloads are extracted in place via
+     * memmove() (see below) instead of copying into a second buffer, halving
+     * peak footprint. Sized to the runtime window choose_h2_rx_window_size()
+     * picked for this connect cycle (<= ML_H2_BUFFER_SIZE). Ported from
+     * djorr5/microlink's `67b230b2` piece (a); adapted to keep the per-iteration
+     * frame_buf scratch read (below) instead of reading straight into h2_recv --
+     * this fork's noise_recv() returns -1 without draining the ciphertext off
+     * the socket when the frame doesn't fit the caller's buffer, which would
+     * desync the stream if the destination window shrinks near the tail end. */
+    uint32_t h2_window = ml->h2_rx_window_size ? ml->h2_rx_window_size : ML_H2_BUFFER_SIZE;
+    uint8_t *h2_recv = ml_psram_malloc(h2_window);
     if (!h2_recv) return -1;
     size_t h2_total = 0;
-
-    uint8_t *resp_buf = ml_psram_malloc(ML_JSON_BUFFER_SIZE);
-    if (!resp_buf) { free(h2_recv); return -1; }
     size_t json_total = 0;
 
     /* Set extended recv timeout for large MapResponse (60 seconds) */
@@ -1528,7 +1563,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
         }
 
         /* Append decrypted data to h2_recv */
-        if (h2_total + frame_len < ML_H2_BUFFER_SIZE) {
+        if (h2_total + frame_len < h2_window) {
             memcpy(h2_recv + h2_total, frame_buf, frame_len);
             h2_total += frame_len;
             window_consumed += frame_len;
@@ -1596,7 +1631,10 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
              (int)(h2_total / 1024),
              (unsigned long)(ml_get_time_ms() - recv_start_ms));
 
-    /* Now parse complete H2 frames from accumulated buffer */
+    /* Now parse complete H2 frames from accumulated buffer, compacting DATA
+     * payloads into the front of the SAME buffer (json_total <= fpos always,
+     * since fpos also advances past 9-byte frame headers and non-DATA frames
+     * that json_total never counts -- memmove handles the overlap safely). */
     int fpos = 0;
     while (fpos + 9 <= (int)h2_total) {
         uint32_t f_len = (h2_recv[fpos] << 16) | (h2_recv[fpos + 1] << 8) | h2_recv[fpos + 2];
@@ -1617,15 +1655,12 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
         }
 
         if (f_type == 0x00 && f_len > 0) {  /* DATA frame */
-            if (json_total + f_len < ML_JSON_BUFFER_SIZE) {
-                memcpy(resp_buf + json_total, h2_recv + fpos, f_len);
-                json_total += f_len;
-            }
+            memmove(h2_recv + json_total, h2_recv + fpos, f_len);
+            json_total += f_len;
         }
 
         fpos += f_len;
     }
-    free(h2_recv);
 
     /* Send connection-level WINDOW_UPDATE to replenish HTTP/2 flow control.
      * Stream 3 is already closed (END_STREAM received), so only update stream 0.
@@ -1639,7 +1674,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
 
     if (json_total == 0) {
         ESP_LOGW(TAG, "Empty MapResponse");
-        free(resp_buf);
+        free(h2_recv);
         return -1;
     }
 
@@ -1650,20 +1685,20 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
         int dump = json_total < 32 ? (int)json_total : 32;
         char hexbuf[97];
         for (int i = 0; i < dump; i++) {
-            sprintf(hexbuf + i * 3, "%02x ", resp_buf[i]);
+            sprintf(hexbuf + i * 3, "%02x ", h2_recv[i]);
         }
         hexbuf[dump * 3] = '\0';
         ESP_LOGI(TAG, "MapResponse first %d bytes (hex): %s", dump, hexbuf);
     }
 
     /* Check for length prefix (Tailscale binary framing: 4-byte big-endian length before JSON) */
-    char *parse_start = (char *)resp_buf;
+    char *parse_start = (char *)h2_recv;
     size_t parse_len = json_total;
 
     /* Find the start of JSON - look for '{' in first 8 bytes */
     int json_offset = -1;
     for (int i = 0; i < 8 && i < (int)json_total; i++) {
-        if (resp_buf[i] == '{') {
+        if (h2_recv[i] == '{') {
             json_offset = i;
             break;
         }
@@ -1686,7 +1721,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     if (!map_json) {
         const char *err = cJSON_GetErrorPtr();
         ESP_LOGE(TAG, "MapResponse JSON parse failed near: %.50s", err ? err : "unknown");
-        free(resp_buf);
+        free(h2_recv);
         return -1;
     }
 
@@ -1884,7 +1919,7 @@ static int do_fetch_peers(microlink_t *ml, ml_noise_state_t *noise) {
     }
 
     cJSON_Delete(map_json);
-    free(resp_buf);
+    free(h2_recv);
 
     int64_t t_map_done = esp_timer_get_time();
     ESP_LOGI(TAG, "[TIMING] MapResponse recv+parse: %lld ms (total map: %lld ms, %dKB)",
@@ -2354,6 +2389,7 @@ void ml_coord_task(void *arg) {
              * before sending our H2 preface. Extracts nodeKeyChallenge
              * and adjusts rx_nonce. */
             process_proactive_frames(ml, &noise);
+            choose_h2_rx_window_size(ml);
             state = COORD_H2_PREFACE;
             break;
 
