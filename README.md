@@ -207,16 +207,15 @@ pong from esp32-microlink (100.x.x.x) via DERP(dfw) in 150ms
 
 ### ESP32-S3 with PSRAM (Recommended)
 
-MapResponse buffers (H2 + JSON) are allocated from PSRAM only during coordination polling, then freed. Peak PSRAM usage is ~1MB (~12% of 8MB). Leaves 200KB+ SRAM free for your application.
+The MapResponse buffer (H2 receive + JSON parse, a single buffer reused in place) is allocated from PSRAM only during coordination polling, then freed. Peak PSRAM usage is ~512KB (~6% of 8MB) at defaults, and less than that whenever free heap is tight — the buffer is clamped to the largest available block (min 64KB) at connect time. Leaves 200KB+ SRAM free for your application.
 
 ### ESP32 without PSRAM
 
-Boards without PSRAM can reduce H2/JSON buffers to 64KB via menuconfig (sufficient for ~30 peers). Total SRAM usage: ~140KB. Suitable for simple sensor reporting, heartbeats, and small data payloads. Not recommended for large tailnets or memory-heavy applications.
+Boards without PSRAM can reduce the H2 buffer to 64KB via menuconfig (sufficient for ~30 peers). Total SRAM usage: ~90KB. Suitable for simple sensor reporting, heartbeats, and small data payloads. Not recommended for large tailnets or memory-heavy applications.
 
 ```ini
 # sdkconfig.defaults for ESP32 without PSRAM
 CONFIG_ML_H2_BUFFER_SIZE_KB=64
-CONFIG_ML_JSON_BUFFER_SIZE_KB=64
 CONFIG_ML_MAX_PEERS=8
 ```
 
@@ -588,8 +587,7 @@ MicroLink V2 Configuration
 | `ML_MAX_PEERS` | `16` | Maximum simultaneous active WireGuard tunnels (1-64). Each uses ~200 bytes. This is NOT the tailnet size limit — MicroLink tracks all peers (300+) but only maintains active tunnels to this many at once. Reduce to 8 for non-PSRAM. |
 | `ML_NVS_MAX_PEERS` | `64` | Peers cached in NVS flash (16-1024). Persists across reboots so DISCO probing starts immediately. Each entry: 92 bytes. LRU eviction when full. |
 | `ML_PRIORITY_PEER_IP` | Empty | Priority peer VPN IP (e.g., `100.x.y.z`). Guaranteed a WG slot even when peer table is full — LRU non-priority peer is evicted. Also settable via web UI. |
-| `ML_H2_BUFFER_SIZE_KB` | `512` | H2 receive buffer (64-2048 KB, PSRAM-backed). Size determines max tailnet: 64KB ≈ 30 peers, 512KB ≈ 300 peers, 2048KB ≈ 1200 peers. |
-| `ML_JSON_BUFFER_SIZE_KB` | `512` | JSON parse buffer (64-2048 KB, PSRAM-backed). cJSON DOM uses 2-3x raw JSON size. Match to H2 buffer. |
+| `ML_H2_BUFFER_SIZE_KB` | `512` | Ceiling for the single H2-receive-and-JSON-parse buffer (64-2048 KB, PSRAM-backed; clamped down to free heap at connect time, min 64KB). Size determines max tailnet: 64KB ≈ 30 peers, 512KB ≈ 300 peers, 2048KB ≈ 1200 peers. |
 
 #### Credentials
 
@@ -710,9 +708,10 @@ Zero-copy mode contributed by [dj-oyu](https://github.com/dj-oyu/microlink).
 
 ### "Failed to parse MapResponse JSON"
 - H2 buffer too small for your tailnet size
-- Increase `ML_H2_BUFFER_SIZE_KB` and `ML_JSON_BUFFER_SIZE_KB` in menuconfig
+- Increase `ML_H2_BUFFER_SIZE_KB` in menuconfig
 - For 300+ peers, use 512KB (default). For 600+, use 1024KB.
 - Ensure PSRAM is enabled: `CONFIG_SPIRAM=y`
+- Check the boot log for "H2 rx window" — if it's clamped well below your configured ceiling, free heap is tight at connect time, not just the ceiling itself
 
 ### PPP connection fails / falls back to AT socket
 - Check carrier APN is correct

@@ -121,7 +121,7 @@ static int hpack_literal_new(uint8_t *out, const char *name, const char *value) 
  *
  * Returns total bytes written, or -1 on error.
  */
-int ml_h2_build_preface(uint8_t *out, size_t out_size) {
+int ml_h2_build_preface(uint8_t *out, size_t out_size, uint32_t window_size) {
     /* Preface (24) + SETTINGS frame header (9) + INITIAL_WINDOW_SIZE setting (6) = 39 bytes */
     if (out_size < H2_PREFACE_LEN + 9 + 6) return -1;
 
@@ -131,11 +131,11 @@ int ml_h2_build_preface(uint8_t *out, size_t out_size) {
     memcpy(out, H2_CONNECTION_PREFACE, H2_PREFACE_LEN);
     pos += H2_PREFACE_LEN;
 
-    /* SETTINGS frame with INITIAL_WINDOW_SIZE = ML_H2_BUFFER_SIZE
+    /* SETTINGS frame with INITIAL_WINDOW_SIZE = window_size (the caller's
+     * runtime-chosen H2 recv window, <= ML_H2_BUFFER_SIZE)
      * Each setting is 6 bytes: 2-byte ID + 4-byte value (RFC 7540 Section 6.5.1)
      * Without this, the server uses the HTTP/2 default of 65535 bytes (64KB),
      * which is too small for large MapResponses (100KB+ on 60+ peer tailnets). */
-    uint32_t window_size = ML_H2_BUFFER_SIZE;
     pos += write_frame_header(out + pos, 6, H2_FRAME_SETTINGS, 0, 0);
 
     /* INITIAL_WINDOW_SIZE (0x04) */

@@ -85,7 +85,7 @@ components/microlink/
 
 **Cellular data path**: PPP is strongly preferred — gives real lwIP sockets, direct UDP, NAT traversal. AT socket bridge is automatic fallback when PPP auth fails. PPP throughput ~6.5 KB/s vs ~0.45 KB/s for AT bridge.
 
-**PSRAM usage**: H2 receive buffer (512KB) and JSON parse buffer (512KB) are allocated from PSRAM during coordination, then freed. Without PSRAM, reduce via `CONFIG_ML_H2_BUFFER_SIZE_KB=64` (supports ~30 peers max).
+**PSRAM usage**: A single H2 receive buffer (512KB default) is allocated from PSRAM during coordination, then freed. It serves double duty — HTTP/2 frames are received into it, then the extracted MapResponse JSON is compacted in place (no separate JSON buffer). At connect time the buffer is further clamped down to whatever's actually free in heap (min 64KB, never above the configured ceiling), so peak usage on a fragmented heap is often less than the configured size. Without PSRAM, reduce the ceiling via `CONFIG_ML_H2_BUFFER_SIZE_KB=64` (supports ~30 peers max).
 
 **NVS namespaces**: `"microlink"` for keys (machine key, WG key, DISCO key), `"ml_peers"` for peer cache. `microlink_factory_reset()` erases both — must call before `microlink_init()`.
 
