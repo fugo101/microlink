@@ -308,6 +308,7 @@ typedef struct {
     /* DISCO state (rate limiting) */
     uint64_t last_ping_sent_ms;     /* Last DISCO ping we sent */
     uint64_t last_pong_recv_ms;     /* Last DISCO pong we received */
+    uint64_t last_pong_sent_ms;     /* Last DISCO pong we sent (rate limit outgoing replies) */
     uint64_t trust_until_ms;        /* Direct path trusted until */
     uint64_t last_send_ms;          /* Last data sent to this peer */
     uint64_t last_upgrade_ms;       /* Last path upgrade attempt */

@@ -52,6 +52,14 @@ static const uint8_t DISCO_MAGIC[6] = { 'T', 'S', 0xf0, 0x9f, 0x92, 0xac };
 #define DISCO_TXID_LEN 12
 #define DISCO_NONCE_LEN 24
 
+/* Once a peer has a trusted direct path, the remote tailscaled peer sends
+ * NAT-keepalive PINGs roughly every few seconds -- responding to every one
+ * with a 3-path PONG (direct + all LAN endpoints + DERP) is pure waste.
+ * Still answer immediately while searching (no direct path yet) or on the
+ * very first PONG, since that's what establishes the path in the first
+ * place. */
+#define DISCO_PONG_RATE_LIMIT_MS 5000
+
 /* Check if an IP (host byte order) is a LAN address */
 static inline bool is_lan_ip(uint32_t ip) {
     return ((ip >> 24) == 10) ||                       /* 10.x.x.x */
@@ -903,6 +911,19 @@ static void process_disco_ping(microlink_t *ml, const ml_rx_packet_t *pkt,
 
     ESP_LOGI(TAG, "DISCO PING from %s (via %s)",
              p->hostname, pkt->via_derp ? "DERP" : "direct");
+
+    /* Rate-limit PONG replies once a direct path is already trusted --
+     * always respond immediately while still searching (no direct path
+     * yet) or on the very first reply, since that's what establishes the
+     * path. */
+    uint64_t now_pong = ml_get_time_ms();
+    bool should_respond = !p->has_direct_path ||
+                          p->last_pong_sent_ms == 0 ||
+                          (now_pong - p->last_pong_sent_ms) >= DISCO_PONG_RATE_LIMIT_MS;
+    if (!should_respond) {
+        return;
+    }
+    p->last_pong_sent_ms = now_pong;
 
     /* Build PONG */
     uint8_t pong[256];
