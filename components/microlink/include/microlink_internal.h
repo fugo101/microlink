@@ -86,6 +86,16 @@ extern "C" {
 #define ML_DERP_REGION          9       /* Dallas (dfw) */
 #define ML_DERP_HOST            "derp9e.tailscale.com"
 #define ML_DERP_PORT            443
+/* Retry-forever backoff for ml_derp_tx_task()'s disconnected branch --
+ * nothing else re-arms a failed connect while coord sits in COORD_LONG_POLL,
+ * so once the bounded 3-attempt retries (in the CONNECT_REQ/RECONNECT event
+ * handlers) are exhausted, this keeps trying with exponential backoff. */
+#define ML_DERP_RETRY_MIN_MS    5000
+#define ML_DERP_RETRY_MAX_MS    60000
+/* RX-liveness watchdog: last_recv_ms advances on every received DERP frame
+ * (server keepalives arrive every ~15-60s). If the socket still reports
+ * connected but nothing has arrived in this long, force a reconnect. */
+#define ML_DERP_STALE_MS        90000
 
 /* Tailscale control plane */
 #define ML_CTRL_HOST            "controlplane.tailscale.com"
