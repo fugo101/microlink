@@ -513,6 +513,13 @@ void ml_derp_tx_task(void *arg) {
     uint64_t connected_since_ms = 0;
     bool verbose_phase = false;  /* verbose logging for first 15s after connect */
 
+    /* Retry-forever backoff state (see ML_DERP_RETRY_MIN_MS/MAX_MS). derp_wanted
+     * latches true the first time a connect is ever requested; derp_next_retry_ms
+     * is 0 until a retry is armed. */
+    bool derp_wanted = false;
+    uint64_t derp_next_retry_ms = 0;
+    uint32_t derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
+
     while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
         loop_count++;
         uint64_t loop_start = ml_get_time_ms();
@@ -543,6 +550,7 @@ void ml_derp_tx_task(void *arg) {
             EventBits_t bits = xEventGroupGetBits(ml->events);
             if ((bits & ML_EVT_DERP_CONNECT_REQ) && !ml->derp.connected) {
                 xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+                derp_wanted = true;
                 /* Retry up to 3 times with 2s backoff. Each attempt can cost
                  * a DNS timeout plus a 10s TLS handshake, so re-check for
                  * shutdown between them — three blind retries is how this
@@ -561,6 +569,8 @@ void ml_derp_tx_task(void *arg) {
                     if (ml_derp_connect(ml) == ESP_OK) {
                         connected_since_ms = ml_get_time_ms();
                         verbose_phase = true;
+                        derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
+                        derp_next_retry_ms = 0;
                         break;
                     }
                     ESP_LOGW(TAG, "DERP connect attempt %d failed", attempt + 1);
@@ -568,6 +578,7 @@ void ml_derp_tx_task(void *arg) {
             }
             if (bits & ML_EVT_DERP_RECONNECT) {
                 xEventGroupClearBits(ml->events, ML_EVT_DERP_RECONNECT);
+                derp_wanted = true;
                 ESP_LOGW(TAG, "DERP reconnect requested (was %s)",
                          ml->derp.connected ? "connected" : "disconnected");
                 ml_derp_disconnect(ml);
@@ -586,6 +597,8 @@ void ml_derp_tx_task(void *arg) {
                     if (ml_derp_connect(ml) == ESP_OK) {
                         connected_since_ms = ml_get_time_ms();
                         verbose_phase = true;
+                        derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
+                        derp_next_retry_ms = 0;
                         break;
                     }
                     ESP_LOGW(TAG, "DERP reconnect attempt %d failed", attempt + 1);
@@ -599,8 +612,46 @@ void ml_derp_tx_task(void *arg) {
         }
 
         if (!ml->derp.connected) {
-            /* Not connected - just wait and check again */
+            /* Not connected. The bounded 3-attempt retries above cover the
+             * common case (connect/reconnect request just fired); this is
+             * the fallback for when those are exhausted and nothing else
+             * re-arms a connect while coord sits in COORD_LONG_POLL --
+             * keep retrying forever with exponential backoff instead of
+             * silently waiting here until the next external event. */
+            if (derp_wanted && !ml_shutdown_pending(ml)) {
+                if (derp_next_retry_ms == 0) {
+                    derp_next_retry_ms = loop_start + derp_backoff_ms;
+                } else if (loop_start >= derp_next_retry_ms) {
+                    ESP_LOGI(TAG, "DERP retry-forever: attempting connect (backoff was %lums)",
+                             (unsigned long)derp_backoff_ms);
+                    if (ml_derp_connect(ml) == ESP_OK) {
+                        connected_since_ms = ml_get_time_ms();
+                        verbose_phase = true;
+                        derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
+                        derp_next_retry_ms = 0;
+                    } else {
+                        derp_backoff_ms = (derp_backoff_ms * 2 > ML_DERP_RETRY_MAX_MS)
+                                               ? ML_DERP_RETRY_MAX_MS : derp_backoff_ms * 2;
+                        derp_next_retry_ms = loop_start + derp_backoff_ms;
+                        ESP_LOGW(TAG, "DERP retry-forever: connect failed, next attempt in %lums",
+                                 (unsigned long)derp_backoff_ms);
+                    }
+                }
+            }
             vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+
+        /* RX-liveness watchdog: last_recv_ms advances on every received DERP
+         * frame; if the socket still reports connected but nothing has
+         * arrived in ML_DERP_STALE_MS, the peer end is gone without a clean
+         * close (e.g. a NAT binding silently expired) -- force a reconnect
+         * rather than sitting on a dead connection indefinitely. */
+        if (ml->derp.last_recv_ms && loop_start > ml->derp.last_recv_ms &&
+            loop_start - ml->derp.last_recv_ms > ML_DERP_STALE_MS) {
+            ESP_LOGW(TAG, "DERP RX silent for %llums, forcing reconnect",
+                     (unsigned long long)(loop_start - ml->derp.last_recv_ms));
+            xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
             continue;
         }
 
