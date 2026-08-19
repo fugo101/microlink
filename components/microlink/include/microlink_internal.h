@@ -95,7 +95,15 @@ extern "C" {
 /* DISCO timing (from tailscaled - MUST match for correct behavior) */
 #define ML_DISCO_PING_INTERVAL_MS       5000
 #define ML_DISCO_HEARTBEAT_MS           3000
-#define ML_DISCO_TRUST_DURATION_MS      15000
+/* Bumped 15000 -> 60000: under sustained AP+STA radio contention (e.g. a
+ * phone speedtest on the same channel), DISCO PINGs starve before the
+ * encrypted WG data path does. 15s of PING silence was enough to falsely
+ * trigger "direct path expired -> revert to DERP" on every active peer
+ * simultaneously, zeroing working endpoints and collapsing throughput. 60s
+ * gives 20 PINGs worth of trust before we even consider falling back, and
+ * disco_periodic_probes' data_flowing gate (below) adds a second check
+ * against the WG layer's own last_rx before actually reverting. */
+#define ML_DISCO_TRUST_DURATION_MS      60000
 #define ML_DISCO_PING_TIMEOUT_MS        5000
 #define ML_DISCO_UPGRADE_INTERVAL_MS    15000
 /* Cap for the per-peer direct-path upgrade backoff. On a P2P-hostile network
