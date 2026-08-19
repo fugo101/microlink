@@ -1029,15 +1029,17 @@ static void process_disco_pong(microlink_t *ml, const ml_rx_packet_t *pkt,
                              (int)((pkt->src_ip >> 24) & 0xFF), (int)((pkt->src_ip >> 16) & 0xFF),
                              (int)((pkt->src_ip >> 8) & 0xFF), (int)(pkt->src_ip & 0xFF),
                              (int)pkt->src_port, p->hostname);
-                    /* First direct path discovery — send a one-shot handshake
-                     * via direct UDP. Do NOT use wireguardif_connect() which
-                     * sets peer->active=true and causes infinite handshake
-                     * retries (every 5s) when the peer has us trimmed.
-                     * Instead, just fire a single handshake init. If the peer
-                     * has us configured, it will respond and establish session.
-                     * If not, we stop and wait for them to initiate. */
-                    if (!p->tried_initial_handshake) {
-                        p->tried_initial_handshake = true;
+                    /* Direct path discovered but no WG session yet. Fire a
+                     * handshake init via direct UDP, rate-limited so a
+                     * dropped or unanswered init gets another try every
+                     * INITIAL_HANDSHAKE_RETRY_MS instead of leaving the peer
+                     * permanently un-sessioned after a single lost attempt. */
+#define INITIAL_HANDSHAKE_RETRY_MS 30000ULL
+                    bool first_try = (p->last_init_handshake_ms == 0);
+                    bool retry_due = !first_try &&
+                        (now - p->last_init_handshake_ms > INITIAL_HANDSHAKE_RETRY_MS);
+                    if (first_try || retry_due) {
+                        p->last_init_handshake_ms = now;
                         /* Store endpoint so wireguardif_connect sends to it */
                         wireguardif_update_endpoint(netif, (u8_t)p->wg_peer_index,
                                                      &ep_ip, pkt->src_port);
@@ -1047,11 +1049,14 @@ static void process_disco_pong(microlink_t *ml, const ml_rx_packet_t *pkt,
                          * checks before a peer may initiate a session at all.
                          * Clearing it here meant no session could ever be
                          * established with this peer — permanently blackholed
-                         * on the direct path. tried_initial_handshake above is
-                         * what actually bounds this to a one-shot attempt. */
+                         * on the direct path. The retry timestamp above is
+                         * what bounds re-attempts to once per
+                         * INITIAL_HANDSHAKE_RETRY_MS. */
                         wireguardif_connect(netif, (u8_t)p->wg_peer_index);
-                        ESP_LOGI(TAG, "WG one-shot handshake to %s (first direct path)", p->hostname);
+                        ESP_LOGI(TAG, "WG direct handshake %s to %s",
+                                 first_try ? "init" : "retry", p->hostname);
                     }
+#undef INITIAL_HANDSHAKE_RETRY_MS
                 }
             }
         }
