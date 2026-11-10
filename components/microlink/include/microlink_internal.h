@@ -649,15 +649,17 @@ esp_err_t ml_peer_nvs_clear(void);
  * persisted so old initiations can't be replayed after a reboot */
 #define ML_WG_TS_LEN 12  /* TAI64N, == WIREGUARDIF_TIMESTAMP_LEN */
 #ifdef CONFIG_ML_WG_TS_PERSIST
-esp_err_t ml_wg_ts_nvs_init(void);
+esp_err_t ml_wg_ts_nvs_init(microlink_t *ml);         /* ml's wg_mgr becomes the poller */
 void ml_wg_ts_nvs_deinit(void);
 bool ml_wg_ts_nvs_load(const uint8_t public_key[32], uint8_t ts[ML_WG_TS_LEN]);
 void ml_wg_ts_nvs_mark_dirty(uint8_t wg_peer_index);  /* Any context, never blocks */
 void ml_wg_ts_nvs_poll(microlink_t *ml, bool force);   /* wg_mgr task only */
-esp_err_t ml_wg_ts_nvs_clear(void);
+esp_err_t ml_wg_ts_nvs_clear(void);                   /* Works before init too */
 #else
-static inline esp_err_t ml_wg_ts_nvs_init(void) { return ESP_OK; }
+static inline esp_err_t ml_wg_ts_nvs_init(microlink_t *ml) { (void)ml; return ESP_OK; }
 static inline void ml_wg_ts_nvs_deinit(void) {}
+static inline bool ml_wg_ts_nvs_load(const uint8_t public_key[32], uint8_t ts[ML_WG_TS_LEN]) { (void)public_key; (void)ts; return false; }
+static inline void ml_wg_ts_nvs_mark_dirty(uint8_t wg_peer_index) { (void)wg_peer_index; }
 static inline void ml_wg_ts_nvs_poll(microlink_t *ml, bool force) { (void)ml; (void)force; }
 static inline esp_err_t ml_wg_ts_nvs_clear(void) { return ESP_OK; }
 #endif
