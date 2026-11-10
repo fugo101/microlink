@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.2.2](https://github.com/fugo101/microlink/compare/v3.2.1...v3.2.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* persist WireGuard handshake timestamps across reboots ([#93](https://github.com/fugo101/microlink/issues/93)) ([8a91737](https://github.com/fugo101/microlink/commit/8a91737b555ac42bda61dfa205289b4326d1a403))
+* **wg:** try the direct handshake only while DISCO trusts the path ([#92](https://github.com/fugo101/microlink/issues/92)) ([c275f8a](https://github.com/fugo101/microlink/commit/c275f8a86763f9ac82b2328eb0a168e20a8f9dd3))
+
 ## [3.2.1](https://github.com/fugo101/microlink/compare/v3.2.0...v3.2.1) (2026-11-10)
 
 
