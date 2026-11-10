@@ -1589,11 +1589,14 @@ esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip) {
     wireguardif_connect_derp(netif, (u8_t)p->wg_peer_index);
     ESP_LOGI(TAG, "WG handshake triggered (DERP) to %s", p->hostname);
 
-    /* Path 2: Direct UDP (if DISCO has a known endpoint).
+    /* Path 2: Direct UDP (if DISCO currently trusts a direct endpoint).
      * This wakes the peer's magicsock via receiveIPv4 → noteRecvActivity.
      * Set connect_ip first, then call wireguardif_connect which copies
-     * connect_ip → ip and starts a second handshake to the direct endpoint. */
-    if (p->best_ip != 0 && p->best_port != 0) {
+     * connect_ip → ip and starts a second handshake to the direct endpoint.
+     * The second handshake replaces the DERP one, so skip it when the
+     * direct path has expired: best_ip is kept after expiry and may be dead. */
+    if (p->has_direct_path && ml_get_time_ms() < p->trust_until_ms &&
+        p->best_ip != 0 && p->best_port != 0) {
         ip_addr_t ep_ip;
         IP_SET_TYPE_VAL(ep_ip, IPADDR_TYPE_V4);
         ip4_addr_set_u32(ip_2_ip4(&ep_ip), htonl(p->best_ip));
