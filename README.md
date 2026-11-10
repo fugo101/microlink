@@ -550,6 +550,8 @@ MicroLink V2 Configuration
 │   ├── Enable zero-copy WireGuard receive    [ ]
 │   ├── Maximum simultaneous WireGuard peers  (16)
 │   ├── Maximum cached peers in NVS           (64)
+│   ├── Persist WireGuard handshake timestamps [*]
+│   ├── Min seconds between timestamp writes  (120)
 │   ├── Priority peer VPN IP                  ()
 │   ├── HTTP/2 receive buffer size (KB)       (512)
 │   └── JSON parse buffer size (KB)           (512)
@@ -586,6 +588,8 @@ MicroLink V2 Configuration
 | `ML_ZERO_COPY_WG` | `n` | Zero-copy WireGuard via raw lwIP PCB (for 30fps+ streaming). See [High-Throughput Mode](#high-throughput-mode-zero-copy-wireguard). |
 | `ML_MAX_PEERS` | `16` | Maximum simultaneous active WireGuard tunnels (1-64). Each uses ~200 bytes. This is NOT the tailnet size limit — MicroLink tracks all peers (300+) but only maintains active tunnels to this many at once. Reduce to 8 for non-PSRAM. |
 | `ML_NVS_MAX_PEERS` | `64` | Peers cached in NVS flash (16-1024). Persists across reboots so DISCO probing starts immediately. Each entry: 92 bytes. LRU eviction when full. |
+| `ML_WG_TS_PERSIST` | `y` | Save each peer's greatest WireGuard handshake timestamp to NVS so a captured handshake can't be replayed after a reboot. One blob in the `ml_peers` namespace, 28 bytes per peer, up to 32 peers (~0.9 KB). Timestamps from before 2020 (peer clock not set) are not saved. |
+| `ML_WG_TS_FLUSH_INTERVAL_S` | `120` | Minimum seconds between those writes (10-86400). Pending values are also written on `esp_restart()` and `microlink_stop()`; a panic or power loss can lose up to this much. Raise it to cut flash wear on large tailnets. |
 | `ML_PRIORITY_PEER_IP` | Empty | Priority peer VPN IP (e.g., `100.x.y.z`). Guaranteed a WG slot even when peer table is full — LRU non-priority peer is evicted. Also settable via web UI. |
 | `ML_H2_BUFFER_SIZE_KB` | `512` | Ceiling for the single H2-receive-and-JSON-parse buffer (64-2048 KB, PSRAM-backed; clamped down to free heap at connect time, min 64KB). Size determines max tailnet: 64KB ≈ 30 peers, 512KB ≈ 300 peers, 2048KB ≈ 1200 peers. |
 
@@ -741,6 +745,12 @@ If the device is in a bad state (wrong keys cached, stale peer data):
 microlink_factory_reset();  // Call before microlink_init()
 ```
 This erases all NVS-stored keys and peer cache. The device will re-register on next boot.
+
+### Peer rejected with "handshake replay"
+If a peer's clock once ran ahead and was then set back, this device keeps rejecting its handshakes, even across reboots (`CONFIG_ML_WG_TS_PERSIST`). Clear the saved handshake timestamps without touching the keys, then reboot:
+```c
+microlink_clear_handshake_timestamps();
+```
 
 ## Performance & Thermal Optimization
 
