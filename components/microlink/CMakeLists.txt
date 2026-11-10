@@ -17,6 +17,10 @@ set(SRCS
     "src/ml_config_httpd.c"
 )
 
+if(CONFIG_ML_WG_TS_PERSIST)
+    list(APPEND SRCS "src/ml_wg_ts_nvs.c")
+endif()
+
 if(CONFIG_ML_ENABLE_CELLULAR)
     list(APPEND SRCS
         "src/ml_cellular.c"

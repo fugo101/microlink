@@ -69,6 +69,40 @@ menu "MicroLink V2 Configuration"
             The blob is PSRAM-backed in memory. Ensure your NVS partition is
             large enough for the configured value.
 
+    config ML_WG_TS_PERSIST
+        bool "Persist WireGuard handshake timestamps (replay protection)"
+        default y
+        help
+            Save the greatest handshake timestamp received from each WireGuard
+            peer to NVS, so a captured handshake initiation can't be replayed
+            once after a reboot (upstream advisory GHSA-7grw-r329-8g8c).
+
+            Stored as one small blob in the "ml_peers" NVS namespace: 28 bytes
+            per peer, up to 32 peers (~0.9KB). Erased by
+            microlink_clear_handshake_timestamps() and
+            microlink_factory_reset().
+
+            Timestamps from before 2020 (peer clock never set, e.g. an ESP32
+            without SNTP) are not saved, so such a peer is not locked out after
+            its own reboot.
+
+    config ML_WG_TS_FLUSH_INTERVAL_S
+        int "Minimum seconds between handshake timestamp writes"
+        depends on ML_WG_TS_PERSIST
+        default 120
+        range 10 86400
+        help
+            Accepted handshakes (about every 2 minutes per active peer) are
+            collected in RAM and written to flash at most once per interval.
+            The first one after boot is written immediately, and pending ones
+            are written on esp_restart() (from any caller) and microlink_stop().
+
+            An initiation accepted since the last write can still be replayed
+            once after a panic, watchdog reset, brown-out or power loss. Keep
+            this at or below the 120 s rekey time so a single active peer's
+            handshakes are written as they arrive; a higher value means less
+            flash wear for large tailnets.
+
     config ML_H2_BUFFER_SIZE_KB
         int "HTTP/2 receive buffer size (KB)"
         default 512

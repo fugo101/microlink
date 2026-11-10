@@ -97,10 +97,21 @@ bool microlink_has_stored_credentials(void);
  *
  * Must be called BEFORE microlink_init(). Erases:
  * - Machine key, WireGuard key, DISCO key (NVS namespace "microlink")
- * - Cached peer data (NVS namespace "ml_peers")
+ * - Cached peer data and saved handshake timestamps (NVS namespace "ml_peers")
  * After reset, next microlink_init() will generate fresh keys.
  */
 esp_err_t microlink_factory_reset(void);
+
+/**
+ * @brief Forget the saved WireGuard handshake timestamps (keys are kept)
+ * @return ESP_OK on success
+ *
+ * Recovery for a peer whose initiations are rejected as "handshake replay"
+ * because its clock once ran ahead and was then set back. Takes effect after
+ * the next reboot. May be called before microlink_init() or while running.
+ * No-op when CONFIG_ML_WG_TS_PERSIST is off.
+ */
+esp_err_t microlink_clear_handshake_timestamps(void);
 
 /**
  * @brief Initialize MicroLink
