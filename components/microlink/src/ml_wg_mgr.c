@@ -668,11 +668,11 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
 
         /* Allowed IP: PEER's VPN IP (or 0.0.0.0/0 if this peer is the
          * configured tailnet-range fallback route, see wg_program_peer_route()).
-         * wireguard-lwip uses allowed_ip for TWO purposes:
-         * 1. Outbound routing: peer_lookup_by_allowed_ip() matches DESTINATION
-         *    IP to find which peer to route to (wireguardif.c:338)
-         * 2. Inbound validation: checks decrypted packet SOURCE IP matches
-         *    peer's allowed_source_ips (wireguardif.c:507)
+         * wireguard-lwip uses allowed_ip for TWO purposes, both with the same
+         * longest-prefix lookup (peer_lookup_by_allowed_ip()):
+         * 1. Outbound routing: the DESTINATION IP picks the peer.
+         * 2. Inbound validation: the decrypted packet's SOURCE IP must route
+         *    back to the peer that sent it.
          * Must be set to the PEER's VPN IP for both to work correctly. */
         if (ml->exit_node_ip != 0 && p->vpn_ip == ml->exit_node_ip) {
             ip_addr_set_any(false, &wg_peer.allowed_ip);

@@ -22,4 +22,4 @@ dependencies:
     # smartalock/wireguard-lwip), its own independent release-please --
     # this version number has nothing to do with microlink's own version.
     # Bump by hand when needed; there is no auto-sync between the two repos.
-    version: "^1.0.0"
+    version: "^1.0.4"
