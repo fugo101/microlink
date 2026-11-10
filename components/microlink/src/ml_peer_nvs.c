@@ -255,6 +255,7 @@ esp_err_t ml_peer_nvs_clear(void) {
     if (err == ESP_OK) {
         nvs_commit(s_nvs);
         if (s_table) memset(s_table, 0, sizeof(peer_nvs_table_t));
+        ml_wg_ts_nvs_clear();  /* Its blob shares this namespace; reset the RAM copy */
         ESP_LOGI(TAG, "Peer NVS cleared");
     }
     return err;

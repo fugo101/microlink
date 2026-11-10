@@ -555,6 +555,16 @@ static void wg_apply_exit_node(microlink_t *ml, uint32_t peer_vpn_ip) {
     }
 }
 
+#ifdef CONFIG_ML_WG_TS_PERSIST
+/* remote_initiation_accepted: runs on the rx path (this task, or the tcpip
+ * thread in zero-copy mode) right after the handshake response is sent.
+ * Only flag the slot - ml_wg_ts_nvs_poll() reads and saves it from our loop. */
+static void wg_initiation_accepted_cb(struct netif *netif, u8_t peer_index) {
+    (void)netif;
+    ml_wg_ts_nvs_mark_dirty(peer_index);
+}
+#endif
+
 static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     /* Peer allowlist filter: don't waste WG slots on non-allowed peers.
      * Still process updates for existing peers (they may become allowed later). */
@@ -598,6 +608,8 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
                 ESP_LOGW(TAG, "Evicting LRU peer %s (%s) for priority peer %s",
                          ml->peers[evict_idx].hostname, evict_ip, update->hostname);
                 if (ml->peers[evict_idx].wg_peer_index >= 0 && ml->wg_netif) {
+                    /* Capture a pending handshake timestamp before the slot is freed */
+                    ml_wg_ts_nvs_poll(ml, false);
                     wireguardif_remove_peer((struct netif *)ml->wg_netif,
                                             ml->peers[evict_idx].wg_peer_index);
                 }
@@ -703,6 +715,16 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
 
         wg_peer.keep_alive = 25;
 
+#ifdef CONFIG_ML_WG_TS_PERSIST
+        /* Restore the greatest handshake timestamp seen from this peer, so an
+         * initiation captured before the last reboot can't be replayed. Only
+         * takes effect for a new WG peer; an existing one keeps its RAM value. */
+        if (ml_wg_ts_nvs_load(p->public_key, wg_peer.greatest_timestamp)) {
+            ESP_LOGD(TAG, "Restored handshake timestamp for %s", p->hostname);
+        }
+        wg_peer.remote_initiation_accepted = wg_initiation_accepted_cb;
+#endif
+
         u8_t wg_peer_idx = WIREGUARDIF_INVALID_INDEX;
         err_t wg_err = wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx);
 
@@ -787,6 +809,10 @@ static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
     /* Remove from wireguard-lwip */
     if (ml->wg_netif && ml->peers[idx].wg_peer_index >= 0) {
         struct netif *netif = (struct netif *)ml->wg_netif;
+        /* Capture a pending handshake timestamp before the slot is freed. The
+         * saved value is kept (not removed with the NVS cache entry) so the peer
+         * stays protected if it rejoins with the same key. */
+        ml_wg_ts_nvs_poll(ml, false);
         wireguardif_remove_peer(netif, (u8_t)ml->peers[idx].wg_peer_index);
     }
 
@@ -1935,6 +1961,9 @@ void ml_wg_mgr_task(void *arg) {
             ESP_LOGI(TAG, "wireguardif_periodic: %llu ms", (unsigned long long)dt);
         }
 
+        /* Save handshake timestamps flagged by the rx path (rate-limited flash write) */
+        ml_wg_ts_nvs_poll(ml, false);
+
         /* Periodic DISCO probes (every 1s check) */
         now = ml_get_time_ms();
         if (now - last_disco_probe_ms > 1000) {
@@ -1975,6 +2004,7 @@ void ml_wg_mgr_task(void *arg) {
     /* Shutdown WireGuard interface */
     if (ml->wg_netif) {
         struct netif *netif = (struct netif *)ml->wg_netif;
+        ml_wg_ts_nvs_poll(ml, true);  /* Write pending handshake timestamps now */
         wireguardif_shutdown(netif);
         netif_set_link_down(netif);
         netif_set_down(netif);

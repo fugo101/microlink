@@ -416,6 +416,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
 
     /* Initialize peer NVS cache */
     ml_peer_nvs_init();
+    ml_wg_ts_nvs_init();
 
     /* Initialize HTTP config server (loads NVS peer allowlist + settings) */
     ml->config_httpd = ml_config_httpd_init();
@@ -834,6 +835,7 @@ void microlink_destroy(microlink_t *ml) {
     /* Peer NVS is a process-wide handle, not per-instance — only close it on
      * the path where this instance really is the last one standing. */
     ml_peer_nvs_deinit();
+    ml_wg_ts_nvs_deinit();
     ml_release(ml);
 }
 
