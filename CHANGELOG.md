@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.1](https://github.com/fugo101/microlink/compare/v3.2.0...v3.2.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** bump wireguard_lwip to 1.0.4 ([#91](https://github.com/fugo101/microlink/issues/91)) ([7ed4f6e](https://github.com/fugo101/microlink/commit/7ed4f6ea4980d2f5907e2aeb4e726cf504b3b983))
+
+
+### Documentation
+
+* **fork-prs:** close [#37](https://github.com/fugo101/microlink/issues/37), deprioritized ([#81](https://github.com/fugo101/microlink/issues/81)) ([da157ac](https://github.com/fugo101/microlink/commit/da157ac17f1b7ea61c0ac298b93f4b5937cc1c59))
+
 ## [3.2.0](https://github.com/fugo101/microlink/compare/v3.1.2...v3.2.0) (2026-08-19)
 
 
