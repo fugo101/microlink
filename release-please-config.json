@@ -1,19 +1,20 @@
 {
-  "release-type": "simple",
-  "bump-minor-pre-major": false,
-  "bootstrap-sha": "bac7d6263525749f665a42cd1ec0e2b89066789d",
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": false,
+  "bump-minor-pre-major": true,
   "changelog-sections": [
-    { "type": "feat",     "section": "Features" },
-    { "type": "fix",      "section": "Bug Fixes" },
-    { "type": "perf",     "section": "Performance" },
-    { "type": "refactor", "section": "Refactoring" },
-    { "type": "docs",     "section": "Documentation" },
-    { "type": "compat",   "section": "ESP-IDF compatibility" },
-    { "type": "chore",    "section": "Miscellaneous", "hidden": true },
-    { "type": "style",    "section": "Styles",        "hidden": true },
-    { "type": "test",     "section": "Tests",         "hidden": true },
-    { "type": "ci",       "section": "CI",            "hidden": true },
-    { "type": "build",    "section": "Build",         "hidden": true }
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "deps", "section": "Dependencies" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "style", "section": "Styles", "hidden": true },
+    { "type": "chore", "section": "Miscellaneous Chores", "hidden": true },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "build", "section": "Build System", "hidden": true },
+    { "type": "ci", "section": "Continuous Integration", "hidden": true }
   ],
   "packages": {
     ".": {

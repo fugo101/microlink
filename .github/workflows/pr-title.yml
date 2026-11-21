@@ -1,0 +1,20 @@
+name: PR title
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+permissions: {}
+jobs:
+  pr-title:
+    name: Conventional PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check the title is a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          types='feat|fix|perf|deps|revert|docs|style|chore|refactor|test|build|ci'
+          re="^(${types})(\([A-Za-z0-9_.,/ -]+\))?!?: [^[:space:]].*$"
+          if [[ "$TITLE" =~ $re ]]; then echo "ok: $TITLE"; exit 0; fi
+          echo "::error::PR title must be '<type>[(scope)][!]: <summary>' with type one of ${types//|/, }. Got: $TITLE"
+          exit 1
